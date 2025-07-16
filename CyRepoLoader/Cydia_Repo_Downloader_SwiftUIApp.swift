@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AppKit
 
 @main
 struct Cydia_Repo_Downloader_SwiftUIApp: App {

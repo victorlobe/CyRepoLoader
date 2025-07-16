@@ -7,13 +7,13 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		57C45F0B2E2851BD00E1391C /* Cydia Repo Downloader SwiftUI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Cydia Repo Downloader SwiftUI.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		57C45F0B2E2851BD00E1391C /* CyRepoLoader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CyRepoLoader.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		57C45F0D2E2851BD00E1391C /* Cydia Repo Downloader SwiftUI */ = {
+		57C45F0D2E2851BD00E1391C /* CyRepoLoader */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "Cydia Repo Downloader SwiftUI";
+			path = CyRepoLoader;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -32,7 +32,7 @@
 		57C45F022E2851BD00E1391C = {
 			isa = PBXGroup;
 			children = (
-				57C45F0D2E2851BD00E1391C /* Cydia Repo Downloader SwiftUI */,
+				57C45F0D2E2851BD00E1391C /* CyRepoLoader */,
 				57C45F0C2E2851BD00E1391C /* Products */,
 			);
 			sourceTree = "<group>";
@@ -40,7 +40,7 @@
 		57C45F0C2E2851BD00E1391C /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				57C45F0B2E2851BD00E1391C /* Cydia Repo Downloader SwiftUI.app */,
+				57C45F0B2E2851BD00E1391C /* CyRepoLoader.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -48,9 +48,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		57C45F0A2E2851BD00E1391C /* Cydia Repo Downloader SwiftUI */ = {
+		57C45F0A2E2851BD00E1391C /* CyRepoLoader */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 57C45F162E2851BE00E1391C /* Build configuration list for PBXNativeTarget "Cydia Repo Downloader SwiftUI" */;
+			buildConfigurationList = 57C45F162E2851BE00E1391C /* Build configuration list for PBXNativeTarget "CyRepoLoader" */;
 			buildPhases = (
 				57C45F072E2851BD00E1391C /* Sources */,
 				57C45F082E2851BD00E1391C /* Frameworks */,
@@ -61,13 +61,13 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				57C45F0D2E2851BD00E1391C /* Cydia Repo Downloader SwiftUI */,
+				57C45F0D2E2851BD00E1391C /* CyRepoLoader */,
 			);
-			name = "Cydia Repo Downloader SwiftUI";
+			name = CyRepoLoader;
 			packageProductDependencies = (
 			);
 			productName = "Cydia Repo Downloader SwiftUI";
-			productReference = 57C45F0B2E2851BD00E1391C /* Cydia Repo Downloader SwiftUI.app */;
+			productReference = 57C45F0B2E2851BD00E1391C /* CyRepoLoader.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -85,7 +85,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 57C45F062E2851BD00E1391C /* Build configuration list for PBXProject "Cydia Repo Downloader SwiftUI" */;
+			buildConfigurationList = 57C45F062E2851BD00E1391C /* Build configuration list for PBXProject "CyRepoLoader" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -99,7 +99,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				57C45F0A2E2851BD00E1391C /* Cydia Repo Downloader SwiftUI */,
+				57C45F0A2E2851BD00E1391C /* CyRepoLoader */,
 			);
 		};
 /* End PBXProject section */
@@ -250,24 +250,38 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = F6ZD5PBKMC;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_USER_SELECTED_FILES = readonly;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = CyRepoLoader;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 12.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.victorlobe.Cydia-Repo-Downloader-SwiftUI";
+				PRODUCT_BUNDLE_IDENTIFIER = com.victorlobe.CyRepoLoader;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
+				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
+				RUNTIME_EXCEPTION_ALLOW_JIT = NO;
+				RUNTIME_EXCEPTION_ALLOW_UNSIGNED_EXECUTABLE_MEMORY = NO;
+				RUNTIME_EXCEPTION_DEBUGGING_TOOL = NO;
+				RUNTIME_EXCEPTION_DISABLE_EXECUTABLE_PAGE_PROTECTION = NO;
+				RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = NO;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -282,24 +296,38 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = F6ZD5PBKMC;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_USER_SELECTED_FILES = readonly;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = CyRepoLoader;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 12.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.victorlobe.Cydia-Repo-Downloader-SwiftUI";
+				PRODUCT_BUNDLE_IDENTIFIER = com.victorlobe.CyRepoLoader;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
+				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
+				RUNTIME_EXCEPTION_ALLOW_JIT = NO;
+				RUNTIME_EXCEPTION_ALLOW_UNSIGNED_EXECUTABLE_MEMORY = NO;
+				RUNTIME_EXCEPTION_DEBUGGING_TOOL = NO;
+				RUNTIME_EXCEPTION_DISABLE_EXECUTABLE_PAGE_PROTECTION = NO;
+				RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = NO;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -312,7 +340,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		57C45F062E2851BD00E1391C /* Build configuration list for PBXProject "Cydia Repo Downloader SwiftUI" */ = {
+		57C45F062E2851BD00E1391C /* Build configuration list for PBXProject "CyRepoLoader" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				57C45F142E2851BE00E1391C /* Debug */,
@@ -321,7 +349,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		57C45F162E2851BE00E1391C /* Build configuration list for PBXNativeTarget "Cydia Repo Downloader SwiftUI" */ = {
+		57C45F162E2851BE00E1391C /* Build configuration list for PBXNativeTarget "CyRepoLoader" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				57C45F172E2851BE00E1391C /* Debug */,
