@@ -24,6 +24,8 @@ struct ContentView: View {
     
     @State private var showOpenFolderButton: Bool = false
     
+    @State private var selectedScheme: String = "https"
+    
     private var versionString: String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
@@ -50,8 +52,38 @@ struct ContentView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
-                TextField("Cydia Repo URL", text: $repoURL)
-                    .textFieldStyle(.roundedBorder)
+                HStack {
+                    Picker("", selection: $selectedScheme) {
+                        Text("").tag("")
+                        Text("http://").tag("http")
+                        Text("https://").tag("https")
+                    }
+                    .pickerStyle(.menu)
+                    .frame(width: 90)
+                    .onChange(of: selectedScheme) { newValue in
+                        // Remove old scheme from repoURL if present, then prepend new scheme if not empty
+                        let trimmed = repoURL.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let url = URL(string: trimmed)
+                        if let url, let currentScheme = url.scheme, (currentScheme == "http" || currentScheme == "https") {
+                            repoURL = trimmed.replacingOccurrences(of: "^https?://", with: "", options: .regularExpression)
+                        }
+                        if !newValue.isEmpty {
+                            repoURL = newValue + "://" + repoURL.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "^https?://", with: "", options: .regularExpression)
+                        }
+                    }
+                    TextField("Cydia Repo URL", text: $repoURL)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit {
+                            if !isRunning && !repoURL.isEmpty && !destDir.isEmpty {
+                                isPaused = false
+                                downloadProcess = nil
+                                showOpenFolderButton = false
+                                errorOutput = ""
+                                logOutput = ""
+                                Task { await mirrorRepo() }
+                            }
+                        }
+                }
 
                 HStack {
                     TextField("Download Destination", text: $destDir)
@@ -200,7 +232,16 @@ struct ContentView: View {
                             ForEach(repoHistory, id: \.self) { url in
                                 HStack {
                                     Button {
-                                        repoURL = url
+                                        if url.hasPrefix("http://") {
+                                            selectedScheme = "http"
+                                            repoURL = String(url.dropFirst("http://".count))
+                                        } else if url.hasPrefix("https://") {
+                                            selectedScheme = "https"
+                                            repoURL = String(url.dropFirst("https://".count))
+                                        } else {
+                                            selectedScheme = ""
+                                            repoURL = url
+                                        }
                                         errorOutput = ""
                                     } label: {
                                         Text(url)
@@ -320,9 +361,12 @@ struct ContentView: View {
 
         await MainActor.run { logOutput += "Validating URL...\n" }
 
-        // Validate repoURL
-        let trimmedRepoURL = repoURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: trimmedRepoURL),
+        // Compose final URL string with selected scheme
+        let finalURLString = (selectedScheme.isEmpty ? "" : selectedScheme + "://") + repoURL.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "^https?://", with: "", options: .regularExpression)
+
+        // Validate finalURLString
+        let trimmedFinalURL = finalURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmedFinalURL),
               let scheme = url.scheme?.lowercased(),
               (scheme == "http" || scheme == "https") else {
             await MainActor.run {
@@ -358,10 +402,10 @@ struct ContentView: View {
         await MainActor.run {
             logOutput += "Found wget at \(wgetPath)\n"
             logOutput += "Preparing download...\n"
-            saveHistoryURL(trimmedRepoURL)
+            saveHistoryURL(trimmedFinalURL)
         }
 
-        let trimmedURL = trimmedRepoURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let trimmedURL = trimmedFinalURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let urlHost = url.host ?? "repo"
         let repoPath = expandedDestDir + "/" + urlHost
         let fileManager = FileManager.default
