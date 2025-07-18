@@ -9,6 +9,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import AppKit
 import Foundation
+import SWCompression
 
 struct ContentView: View {
     @State private var repoURL: String = ""
@@ -19,7 +20,7 @@ struct ContentView: View {
     @State private var errorOutput: String = ""
     @State private var showingPicker = false
     @State private var shouldAutoScroll: Bool = true
-    @State private var downloadProcess: Process? = nil
+    @State private var downloadTask: URLSessionDownloadTask? = nil
     @State private var isPaused: Bool = false
     
     @State private var showOpenFolderButton: Bool = false
@@ -60,23 +61,19 @@ struct ContentView: View {
                     }
                     .pickerStyle(.menu)
                     .frame(width: 90)
-                    .onChange(of: selectedScheme) { newValue in
-                        // Remove old scheme from repoURL if present, then prepend new scheme if not empty
-                        let trimmed = repoURL.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let url = URL(string: trimmed)
-                        if let url, let currentScheme = url.scheme, (currentScheme == "http" || currentScheme == "https") {
-                            repoURL = trimmed.replacingOccurrences(of: "^https?://", with: "", options: .regularExpression)
-                        }
-                        if !newValue.isEmpty {
-                            repoURL = newValue + "://" + repoURL.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "^https?://", with: "", options: .regularExpression)
-                        }
+                    .onChange(of: selectedScheme) { _ in
+                        repoURL = repoURL.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "^https?://", with: "", options: .regularExpression)
                     }
                     TextField("Cydia Repo URL", text: $repoURL)
                         .textFieldStyle(.roundedBorder)
+                        .onChange(of: repoURL) { newValue in
+                            let cleaned = newValue.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "^https?://", with: "", options: .regularExpression)
+                            if repoURL != cleaned { repoURL = cleaned }
+                        }
                         .onSubmit {
                             if !isRunning && !repoURL.isEmpty && !destDir.isEmpty {
                                 isPaused = false
-                                downloadProcess = nil
+                                downloadTask = nil
                                 showOpenFolderButton = false
                                 errorOutput = ""
                                 logOutput = ""
@@ -159,7 +156,7 @@ struct ContentView: View {
                 HStack {
                     Button(isRunning ? "Downloading..." : "Start Download") {
                         isPaused = false
-                        downloadProcess = nil
+                        downloadTask = nil
                         showOpenFolderButton = false
                         errorOutput = "" // Reset errors when starting a new download
                         logOutput = ""   // Clear log only when starting a new download
@@ -174,6 +171,8 @@ struct ContentView: View {
                         }
                         .buttonStyle(.bordered)
 
+                        // Pause/Resume disabled for now because URLSession tasks are not trivially pausable
+                        /*
                         if isPaused {
                             Button("Resume") {
                                 resumeDownload()
@@ -185,6 +184,7 @@ struct ContentView: View {
                             }
                             .buttonStyle(.bordered)
                         }
+                        */
                     }
                 }
 
@@ -242,6 +242,7 @@ struct ContentView: View {
                                             selectedScheme = ""
                                             repoURL = url
                                         }
+                                        repoURL = repoURL.replacingOccurrences(of: "^https?://", with: "", options: .regularExpression)
                                         errorOutput = ""
                                     } label: {
                                         Text(url)
@@ -315,12 +316,12 @@ struct ContentView: View {
     }
 
     func cancelDownload() {
-        if let process = downloadProcess, process.isRunning {
-            process.terminate()
+        if let task = downloadTask {
+            task.cancel()
             Task { await MainActor.run {
                 errorOutput = "Download cancelled by user."
                 isRunning = false
-                downloadProcess = nil
+                downloadTask = nil
                 isPaused = false
                 showOpenFolderButton = false
             }}
@@ -328,25 +329,15 @@ struct ContentView: View {
     }
 
     func pauseDownload() {
-        if let process = downloadProcess, !isPaused, process.isRunning {
-            process.suspend()
-            Task { await MainActor.run {
-                isPaused = true
-                logOutput += "Paused.\n"
-            }}
-        }
+        // Pause/resume disabled for now
     }
 
     func resumeDownload() {
-        if let process = downloadProcess, isPaused {
-            process.resume()
-            Task { await MainActor.run {
-                isPaused = false
-                logOutput += "Resumed.\n"
-            }}
-        }
+        // Pause/resume disabled for now
     }
 
+    // MARK: - New mirrorRepo implementation
+    
     func mirrorRepo() async {
         await MainActor.run {
             errorOutput = ""
@@ -354,29 +345,33 @@ struct ContentView: View {
 
         await MainActor.run {
             isRunning = true
-            logOutput = "" // Clear log only when starting a new download
+            logOutput = ""
             shouldAutoScroll = true
             showOpenFolderButton = false
         }
 
-        await MainActor.run { logOutput += "Validating URL...\n" }
+        await MainActor.run { logOutput += "Validating URL and destination directory...\n" }
 
         // Compose final URL string with selected scheme
-        let finalURLString = (selectedScheme.isEmpty ? "" : selectedScheme + "://") + repoURL.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "^https?://", with: "", options: .regularExpression)
+        let cleanRepoURL = repoURL.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "^https?://", with: "", options: .regularExpression)
+        let finalURLString = (selectedScheme.isEmpty ? "" : selectedScheme + "://") + cleanRepoURL
 
         // Validate finalURLString
         let trimmedFinalURL = finalURLString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: trimmedFinalURL),
-              let scheme = url.scheme?.lowercased(),
-              (scheme == "http" || scheme == "https") else {
+        guard let baseURL = URL(string: trimmedFinalURL) else {
             await MainActor.run {
                 errorOutput = "Invalid URL: Please enter a valid URL starting with http:// or https://"
                 isRunning = false
             }
             return
         }
-
-        await MainActor.run { logOutput += "Validating destination directory...\n" }
+        guard let scheme = baseURL.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+            await MainActor.run {
+                errorOutput = "Invalid URL scheme: Use http:// or https://"
+                isRunning = false
+            }
+            return
+        }
 
         // Validate destDir
         let expandedDestDir = (destDir as NSString).expandingTildeInPath
@@ -389,31 +384,12 @@ struct ContentView: View {
             return
         }
 
-        await MainActor.run { logOutput += "Locating wget executable...\n" }
-
-        guard let wgetPath = findWgetPath(), FileManager.default.isExecutableFile(atPath: wgetPath) else {
-            await MainActor.run {
-                errorOutput = "wget not found in your system PATH. Please install wget and make sure it's available in PATH."
-                isRunning = false
-            }
-            return
-        }
-
-        await MainActor.run {
-            logOutput += "Found wget at \(wgetPath)\n"
-            logOutput += "Preparing download...\n"
-            saveHistoryURL(trimmedFinalURL)
-        }
-
-        let trimmedURL = trimmedFinalURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let urlHost = url.host ?? "repo"
-        let repoPath = expandedDestDir + "/" + urlHost
-        let fileManager = FileManager.default
-
-        await MainActor.run { logOutput += "Creating target directory...\n" }
+        // Create repo folder path
+        let urlHost = baseURL.host ?? "repo"
+        let repoPath = URL(fileURLWithPath: expandedDestDir).appendingPathComponent(urlHost, isDirectory: true)
 
         do {
-            try fileManager.createDirectory(atPath: repoPath, withIntermediateDirectories: true, attributes: nil)
+            try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true, attributes: nil)
         } catch {
             await MainActor.run {
                 errorOutput = "Failed to create destination directory: \(error.localizedDescription)"
@@ -422,204 +398,469 @@ struct ContentView: View {
             return
         }
 
-        // Clean old logs
-        let logFile = repoPath + "/wget.log"
-        let errorFile = repoPath + "/wget-errors.log"
-        do {
-            try? fileManager.removeItem(atPath: logFile)
-            try? fileManager.removeItem(atPath: errorFile)
-        }
+        await MainActor.run { logOutput += "Checking repo metadata files...\n" }
 
-        let wgetArgs = [
-            "--mirror", "--no-parent", "--convert-links", "--restrict-file-names=windows", "--wait=1",
-            "-e", "robots=off", trimmedURL
+        let fileManager = FileManager.default
+
+        // Define possible metadata file names to try
+        let metadataFiles = [
+            "Release",
+            "Packages",
+            "Packages.bz2",
+            "Packages.gz"
+        ]
+        // Common hardcoded fallback sub-paths to try if root not found or suite/codename missing
+        let fallbackSubpaths = [
+            "/./",
+            "/dists/stable/main/binary-iphoneos-arm/"
         ]
 
-        let outPipe = Pipe()
+        var repoBaseURL = baseURL
+        var foundMetadataURL: URL? = nil
+        var metadataData: Data? = nil
+        var metadataFileName: String? = nil
 
-        await MainActor.run { logOutput += "Starting download...\n" }
-
-        // Run wget and streaming output off main thread
-        await withCheckedContinuation { continuation in
-            Task.detached(priority: .background) {
-                let wget = Process()
-                wget.launchPath = wgetPath
-                wget.arguments = wgetArgs
-                wget.currentDirectoryPath = repoPath
-                wget.standardOutput = outPipe
-                wget.standardError = outPipe
-
-                await MainActor.run {
-                    downloadProcess = wget
-                    isPaused = false
-                    showOpenFolderButton = false
+        // Helper function to try fetch metadata file at given base URL and filename,
+        // trying both base URL with and without trailing slash for robustness
+        func tryMetadataFile(base: URL, filename: String) async -> Data? {
+            // Prepare candidate URLs (with and without trailing slash)
+            var candidateURLs: [URL] = []
+            if base.absoluteString.hasSuffix("/") {
+                candidateURLs.append(base.appendingPathComponent(filename))
+            } else {
+                candidateURLs.append(base.appendingPathComponent(filename))
+                if let urlWithSlash = URL(string: base.absoluteString + "/") {
+                    candidateURLs.append(urlWithSlash.appendingPathComponent(filename))
                 }
-
-                let fileManager = FileManager.default
-                let logHandle: FileHandle
-                do {
-                    if fileManager.fileExists(atPath: logFile) {
-                        guard let handle = FileHandle(forWritingAtPath: logFile) else {
-                            await MainActor.run {
-                                errorOutput = "Failed to open log file for writing."
-                                isRunning = false
-                                downloadProcess = nil
-                                isPaused = false
-                                showOpenFolderButton = false
-                            }
-                            continuation.resume()
-                            return
-                        }
-                        logHandle = handle
-                        logHandle.seekToEndOfFile()
-                    } else {
-                        fileManager.createFile(atPath: logFile, contents: nil, attributes: [FileAttributeKey.posixPermissions: 0o644])
-                        guard let handle = FileHandle(forWritingAtPath: logFile) else {
-                            await MainActor.run {
-                                errorOutput = "Failed to create log file."
-                                isRunning = false
-                                downloadProcess = nil
-                                isPaused = false
-                                showOpenFolderButton = false
-                            }
-                            continuation.resume()
-                            return
-                        }
-                        logHandle = handle
-                    }
-                } catch {
-                    await MainActor.run {
-                        errorOutput = "Error accessing log file: \(error.localizedDescription)"
-                        isRunning = false
-                        downloadProcess = nil
-                        isPaused = false
-                        showOpenFolderButton = false
-                    }
-                    continuation.resume()
-                    return
-                }
-
-                // Stream log output live
-                Task.detached(priority: .background) {
-                    do {
-                        for try await line in outPipe.fileHandleForReading.bytes.lines {
-                            await MainActor.run {
-                                logOutput += line + "\n"
-                            }
-                            if let data = (line + "\n").data(using: .utf8) {
-                                try? logHandle.write(contentsOf: data)
-                            }
-                        }
-                    } catch {
-                        // Ignored for live streaming errors
-                    }
-                }
-
-                do {
-                    try wget.run()
-                    wget.waitUntilExit()
-                } catch {
-                    await MainActor.run {
-                        errorOutput = "Failed to run wget process: \(error.localizedDescription)"
-                        isRunning = false
-                        downloadProcess = nil
-                        isPaused = false
-                        showOpenFolderButton = false
-                    }
-                    logHandle.closeFile()
-                    continuation.resume()
-                    return
-                }
-
-                logHandle.closeFile()
-
-                if wget.terminationStatus != 0 {
-                    await MainActor.run {
-                        errorOutput = "wget exited with status \(wget.terminationStatus). Please check the logs for details."
-                        logOutput += "\n⚠️ Warning: wget exited with non-zero status \(wget.terminationStatus)."
-                        isRunning = false
-                        downloadProcess = nil
-                        isPaused = false
-                        showOpenFolderButton = false
-                    }
-                    continuation.resume()
-                    return
-                }
-
-                // Grep errors to error log
-                do {
-                    let logContent = try String(contentsOfFile: logFile)
-                    let errorLines = logContent.split(separator: "\n").filter {
-                        $0.range(of: "404|fehler|error|not found|unavailable", options: .regularExpression) != nil
-                    }
-                    if !errorLines.isEmpty {
-                        try errorLines.joined(separator: "\n").write(toFile: errorFile, atomically: true, encoding: .utf8)
-                        await MainActor.run {
-                            errorOutput = "Download completed with errors. See below:\n" + errorLines.joined(separator: "\n")
-                        }
-                    } else {
-                        try? fileManager.removeItem(atPath: errorFile)
-                        await MainActor.run {
-                            errorOutput = ""
-                            logOutput += "\n✅ Download completed successfully with no errors."
-                        }
-                    }
-                } catch {
-                    await MainActor.run {
-                        errorOutput = "Error processing wget log files: \(error.localizedDescription)"
-                    }
-                    continuation.resume()
-                    return
-                }
-
-                await MainActor.run {
-                    logOutput += "\nAll done. Your local mirror is at: \(repoPath)\n"
-                    logOutput += "Download complete.\n"
-                    isRunning = false
-                    downloadProcess = nil
-                    isPaused = false
-                    // Show Open Folder button whenever the folder exists, even if errors occurred
-                    showOpenFolderButton = (repoFolderURL != nil && FileManager.default.fileExists(atPath: repoFolderURL!.path))
-                }
-                continuation.resume()
             }
+            for url in candidateURLs {
+                do {
+                    await MainActor.run { logOutput += "Trying \(url.absoluteString)...\n" }
+                    let data = try await fetchURL(url)
+                    await MainActor.run { logOutput += "Found \(filename) at \(url.absoluteString)\n" }
+                    return data
+                } catch {
+                    await MainActor.run { logOutput += "Not found or error fetching \(filename) at \(url.absoluteString): \(error.localizedDescription)\n" }
+                }
+            }
+            return nil
+        }
+
+        // First, try root metadata files (Release, Packages, etc) as before
+        outerLoop: for filename in metadataFiles {
+            if let data = await tryMetadataFile(base: baseURL, filename: filename) {
+                foundMetadataURL = baseURL.appendingPathComponent(filename)
+                metadataData = data
+                metadataFileName = filename
+                break outerLoop
+            }
+        }
+
+        // If Release file found at root, parse its Suite, Codename, Components fields to build subpaths
+        var suite: String? = nil
+        var codename: String? = nil
+        var components: [String] = []
+
+        if metadataFileName == "Release", let metadata = metadataData {
+            // Parse Release file content (key: value)
+            if let content = String(data: metadata, encoding: .utf8) {
+                func parseField(_ key: String) -> String? {
+                    let pattern = "^\(key):\\s*(.*)$"
+                    if let regex = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]) {
+                        let nsContent = content as NSString
+                        if let match = regex.firstMatch(in: content, options: [], range: NSRange(location: 0, length: nsContent.length)) {
+                            let range = match.range(at: 1)
+                            if range.location != NSNotFound {
+                                return nsContent.substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines)
+                            }
+                        }
+                    }
+                    return nil
+                }
+                suite = parseField("Suite")
+                codename = parseField("Codename")
+                if let comps = parseField("Components") {
+                    components = comps.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+                }
+            }
+        }
+
+        // Construct subpaths to try for Packages files based on suite/codename/components
+        var constructedSubpaths: [String] = []
+
+        // Helper to append subpaths for a given release name (suite or codename)
+        func addSubpaths(forRelease release: String) {
+            for comp in components.isEmpty ? ["main"] : components {
+                let subpath = "/dists/\(release)/\(comp)/binary-iphoneos-arm/"
+                constructedSubpaths.append(subpath)
+            }
+        }
+
+        if suite != nil || codename != nil {
+            await MainActor.run { logOutput += "Parsed Release file fields: Suite=\(suite ?? "nil"), Codename=\(codename ?? "nil"), Components=\(components.isEmpty ? "main" : components.joined(separator: ", "))\n" }
+        }
+
+        if let suite = suite, !suite.isEmpty {
+            addSubpaths(forRelease: suite)
+        }
+        if let codename = codename, !codename.isEmpty, codename != suite {
+            addSubpaths(forRelease: codename)
+        }
+        // If no suite/codename or no components, fallback to existing hardcoded fallbacks
+        if constructedSubpaths.isEmpty {
+            constructedSubpaths.append(contentsOf: fallbackSubpaths)
+        }
+
+        // If we didn't find a Release file at root or need to try Packages files in those subpaths:
+        if metadataFileName != "Release" {
+            // If no Release found, also try constructed subpaths if any (e.g. suite/codename paths)
+            if !constructedSubpaths.isEmpty {
+                await MainActor.run { logOutput += "No Release file found at root; trying constructed subpaths for Packages files.\n" }
+            }
+        }
+
+        // Now try Packages files in constructed subpaths in priority order
+        if metadataFileName == "Release" || metadataFileName == nil {
+            var foundInSubpath = false
+            subpathLoop: for subpath in constructedSubpaths {
+                guard let subURL = URL(string: subpath, relativeTo: baseURL)?.absoluteURL else { continue }
+                for filename in ["Packages", "Packages.gz", "Packages.bz2"] {
+                    if let data = await tryMetadataFile(base: subURL, filename: filename) {
+                        foundMetadataURL = subURL.appendingPathComponent(filename)
+                        metadataData = data
+                        metadataFileName = filename
+                        repoBaseURL = subURL
+                        foundInSubpath = true
+                        break subpathLoop
+                    }
+                }
+            }
+            if !foundInSubpath, metadataFileName == "Release" {
+                // Try fallback hardcoded subpaths if constructed subpaths failed
+                fallbackLoop: for fallbackSubpath in fallbackSubpaths {
+                    guard let fallbackURL = URL(string: fallbackSubpath, relativeTo: baseURL)?.absoluteURL else { continue }
+                    for filename in ["Packages", "Packages.gz", "Packages.bz2"] {
+                        if let data = await tryMetadataFile(base: fallbackURL, filename: filename) {
+                            foundMetadataURL = fallbackURL.appendingPathComponent(filename)
+                            metadataData = data
+                            metadataFileName = filename
+                            repoBaseURL = fallbackURL
+                            break fallbackLoop
+                        }
+                    }
+                }
+            }
+        }
+
+        guard let metadataURL = foundMetadataURL, let metadata = metadataData, let metadataName = metadataFileName else {
+            await MainActor.run {
+                errorOutput = "Failed to locate repo metadata files (Release, Packages, Packages.bz2, or Packages.gz)."
+                isRunning = false
+            }
+            return
+        }
+
+        // Parse Packages or compressed Packages files for .deb relative paths if applicable
+        var debRelativePaths: [String] = []
+        if metadataName == "Packages" {
+            await MainActor.run { logOutput += "Parsing Packages file...\n" }
+            debRelativePaths = parsePackagesFile(metadata)
+            if debRelativePaths.isEmpty {
+                await MainActor.run {
+                    errorOutput = "No .deb file URLs found in Packages file."
+                    isRunning = false
+                }
+                return
+            }
+        } else if metadataName == "Packages.gz" {
+            await MainActor.run { logOutput += "Parsing Packages.gz file...\n" }
+            do {
+                let packagesData = try decompressGzip(data: metadata)
+                debRelativePaths = parsePackagesFile(packagesData)
+                if debRelativePaths.isEmpty {
+                    await MainActor.run {
+                        errorOutput = "No .deb file URLs found in Packages.gz file."
+                        isRunning = false
+                    }
+                    return
+                }
+            } catch {
+                await MainActor.run {
+                    errorOutput = "Failed to parse Packages.gz file: \(error.localizedDescription)"
+                    isRunning = false
+                }
+                return
+            }
+        } else if metadataName == "Packages.bz2" {
+            await MainActor.run { logOutput += "Parsing Packages.bz2 file...\n" }
+            do {
+                let packagesData = try decompressBz2(data: metadata)
+                debRelativePaths = parsePackagesFile(packagesData)
+                if debRelativePaths.isEmpty {
+                    await MainActor.run {
+                        errorOutput = "No .deb file URLs found in Packages.bz2 file."
+                        isRunning = false
+                    }
+                    return
+                }
+            } catch {
+                await MainActor.run {
+                    errorOutput = "BZ2 decompression not supported yet. Cannot parse Packages.bz2."
+                    isRunning = false
+                }
+                return
+            }
+        } else if metadataName == "Release" {
+            // Release file found, but no Packages file; fallback to recursive mirror
+            await recursiveMirrorRepo(from: repoBaseURL, to: repoPath)
+            return
+        }
+
+        // Now join each relative path with repoBaseURL safely to form absolute URLs to download
+        var debURLs: [URL] = []
+        for relativePath in debRelativePaths {
+            if let url = URL(string: relativePath), url.scheme == nil {
+                // relative path - join with repoBaseURL
+                let combinedURL = repoBaseURL.appendingPathComponent(relativePath)
+                debURLs.append(combinedURL)
+            } else if let url = URL(string: relativePath) {
+                // absolute URL (with http/https)
+                debURLs.append(url)
+            }
+        }
+
+        // Start downloading all .deb files one by one
+        await MainActor.run {
+            logOutput += "Starting download of \(debURLs.count) .deb files...\n"
+        }
+
+        // Save to history
+        await MainActor.run {
+            saveHistoryURL(trimmedFinalURL)
+        }
+
+        // Download .deb files in sequence to preserve order and progress display
+        for (index, debURL) in debURLs.enumerated() {
+            if !isRunning {
+                await MainActor.run { logOutput += "Download cancelled.\n" }
+                break
+            }
+
+            // Calculate local file path relative to repoBaseURL
+            var localRelativePath = debURL.path
+            if let baseHost = repoBaseURL.host, baseHost == debURL.host {
+                let basePath = repoBaseURL.path
+                if localRelativePath.hasPrefix(basePath) {
+                    localRelativePath = String(localRelativePath.dropFirst(basePath.count))
+                }
+            }
+            if localRelativePath.hasPrefix("/") { localRelativePath.removeFirst() }
+            let localFileURL = repoPath.appendingPathComponent(localRelativePath)
+
+            // Ensure directory exists
+            let localDir = localFileURL.deletingLastPathComponent()
+            do {
+                try fileManager.createDirectory(at: localDir, withIntermediateDirectories: true, attributes: nil)
+            } catch {
+                await MainActor.run {
+                    logOutput += "Failed to create directory \(localDir.path): \(error.localizedDescription)\n"
+                }
+                continue
+            }
+
+            // Download file if not exists or file size is zero
+            if fileManager.fileExists(atPath: localFileURL.path) {
+                do {
+                    let attrs = try fileManager.attributesOfItem(atPath: localFileURL.path)
+                    if let fileSize = attrs[.size] as? UInt64, fileSize > 0 {
+                        await MainActor.run {
+                            logOutput += "[\(index+1)/\(debURLs.count)] Skipping existing file: \(localRelativePath)\n"
+                        }
+                        continue
+                    }
+                } catch {
+                    // ignore and proceed to download
+                }
+            }
+
+            await MainActor.run {
+                logOutput += "[\(index+1)/\(debURLs.count)] Downloading: \(localRelativePath)\n"
+            }
+
+            do {
+                let fileData = try await fetchURL(debURL)
+                try fileData.write(to: localFileURL)
+                await MainActor.run {
+                    logOutput += "Saved to \(localFileURL.path)\n"
+                }
+            } catch {
+                await MainActor.run {
+                    logOutput += "Failed to download \(debURL.absoluteString): \(error.localizedDescription)\n"
+                    if errorOutput.isEmpty {
+                        errorOutput = "Errors occurred during download. See log for details."
+                    }
+                }
+            }
+        }
+
+        await MainActor.run {
+            logOutput += "\nAll done. Your local mirror is at: \(repoPath.path)\n"
+            logOutput += "Download complete.\n"
+            isRunning = false
+            downloadTask = nil
+            isPaused = false
+            showOpenFolderButton = (repoFolderURL != nil && fileManager.fileExists(atPath: repoFolderURL!.path))
         }
     }
+
+    // MARK: - Helper to fetch URL with Cydia User-Agent
     
-    func findWgetPath() -> String? {
-        // 1. Try /usr/bin/env which wget
-        let process = Process()
-        let pipe = Pipe()
-        process.launchPath = "/usr/bin/env"
-        process.arguments = ["which", "wget"]
-        process.standardOutput = pipe
-        do {
-            try process.run()
-        } catch {
-            // Ignore and try fallback locations
+    func fetchURL(_ url: URL) async throws -> Data {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        //request.setValue("Cydia/1.1.30", forHTTPHeaderField: "User-Agent")
+        request.setValue("Telesphoreo APT-HTTP/1.0.592", forHTTPHeaderField: "User-Agent")
+        request.setValue("iPhone6,1", forHTTPHeaderField: "X-Machine")
+        request.setValue("8843d7f92416211de9ebb963ff4ce28125932878", forHTTPHeaderField: "X-Unique-ID")
+        request.setValue("10.1.1", forHTTPHeaderField: "X-Firmware")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResp = response as? HTTPURLResponse,
+              (200...299).contains(httpResp.statusCode) else {
+            throw URLError(.badServerResponse)
         }
-        process.waitUntilExit()
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        if let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !output.isEmpty, FileManager.default.isExecutableFile(atPath: output) {
-            return output
+        return data
+    }
+
+    // MARK: - Parse Packages file to extract .deb relative paths
+    
+    // Changed to return relative paths (String) instead of URLs
+    func parsePackagesFile(_ data: Data) -> [String] {
+        guard let content = String(data: data, encoding: .utf8) else { return [] }
+        var debRelativePaths: [String] = []
+        let lines = content.components(separatedBy: .newlines)
+        var currentPackageDict: [String: String] = [:]
+
+        func foundDebRelativePath(from dict: [String: String]) -> String? {
+            guard let filename = dict["Filename"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !filename.isEmpty else { return nil }
+            return filename
         }
-        // 2. Check common install locations
-        let fallbackPaths = [
-            "/opt/homebrew/bin/wget",
-            "/usr/local/bin/wget",
-            "/usr/bin/wget"
-        ]
-        for path in fallbackPaths {
-            if FileManager.default.isExecutableFile(atPath: path) {
-                return path
+
+        for line in lines {
+            if line.isEmpty {
+                // block ended, process current package
+                if let debPath = foundDebRelativePath(from: currentPackageDict) {
+                    debRelativePaths.append(debPath)
+                }
+                currentPackageDict.removeAll()
+            } else if let colonRange = line.range(of: ":") {
+                let key = String(line[..<colonRange.lowerBound]).trimmingCharacters(in: .whitespaces)
+                let value = String(line[colonRange.upperBound...]).trimmingCharacters(in: .whitespaces)
+                if let oldValue = currentPackageDict[key] {
+                    currentPackageDict[key] = oldValue + "\n" + value
+                } else {
+                    currentPackageDict[key] = value
+                }
             }
         }
-        return nil
+        // Last package block (if no trailing newline)
+        if !currentPackageDict.isEmpty, let debPath = foundDebRelativePath(from: currentPackageDict) {
+            debRelativePaths.append(debPath)
+        }
+        return debRelativePaths
+    }
+    
+    // MARK: - Decompress gzip data
+    func decompressGzip(data: Data) throws -> Data {
+        // SWCompression will unpack the first member of the .gz archive
+        return try GzipArchive.unarchive(archive: data)
+    }
+
+    // MARK: - Decompress bz2 data
+    func decompressBz2(data: Data) throws -> Data {
+        // BZip2.decompress returns the raw decompressed bytes
+        return try BZip2.decompress(data: data)
     }
     
     func openRepoFolder() {
         guard let url = repoFolderURL else { return }
         NSWorkspace.shared.open(url)
+    }
+    
+    /// Recursively download all reachable files from a given base URL to the given destination directory (mimics wget -r)
+    func recursiveMirrorRepo(from baseURL: URL, to localDir: URL) async {
+        await MainActor.run { logOutput += "Packages files not found. Falling back to wget-style recursive mirror...\n" }
+        
+        // List of known index files to skip for recursion (already checked above)
+        let skipFiles = Set(["Release", "Packages", "Packages.gz"])
+        let fileManager = FileManager.default
+        let session = URLSession.shared
+        
+        // Try to fetch index.html or directory file listing
+        let indexFiles = ["index.html", "index.htm", "Index", ""]
+        var foundListing = false
+        for indexFile in indexFiles {
+            let dirURL = indexFile.isEmpty ? baseURL : baseURL.appendingPathComponent(indexFile)
+            do {
+                let data = try await fetchURL(dirURL)
+                if let html = String(data: data, encoding: .utf8) {
+                    // Find all href links
+                    let pattern = "href=\\\"([^\\\"]+)\\\""
+                    let regex = try? NSRegularExpression(pattern: pattern)
+                    let nsHtml = html as NSString
+                    let matches = regex?.matches(in: html, range: NSRange(location: 0, length: nsHtml.length)) ?? []
+                    var sublinks: [String] = []
+                    for match in matches {
+                        if let range = Range(match.range(at: 1), in: html) {
+                            let href = String(html[range])
+                            // Skip parent links
+                            if href == "../" || href.hasPrefix("#") { continue }
+                            // Avoid re-downloading index files
+                            let lastComponent = URL(string: href)?.lastPathComponent ?? (href as NSString).lastPathComponent
+                            if skipFiles.contains(lastComponent) { continue }
+                            sublinks.append(href)
+                        }
+                    }
+                    foundListing = true
+                    for href in sublinks {
+                        // Build new URL and local path
+                        let subURL = URL(string: href, relativeTo: baseURL)?.absoluteURL ?? baseURL.appendingPathComponent(href)
+                        let relativePath = subURL.path.replacingOccurrences(of: baseURL.path, with: "", options: .anchored)
+                        let localFileURL = localDir.appendingPathComponent(relativePath)
+                        if href.hasSuffix("/") {
+                            // Recurse into subdirectory
+                            do {
+                                try fileManager.createDirectory(at: localFileURL, withIntermediateDirectories: true, attributes: nil)
+                            } catch {}
+                            await recursiveMirrorRepo(from: subURL, to: localFileURL)
+                        } else {
+                            // Download file
+                            await MainActor.run { logOutput += "Recursively downloading: \(subURL.absoluteString)\n" }
+                            do {
+                                let fileData = try await fetchURL(subURL)
+                                try fileData.write(to: localFileURL)
+                                await MainActor.run { logOutput += "Saved recursively to \(localFileURL.path)\n" }
+                            } catch {
+                                await MainActor.run { logOutput += "Failed to download (recursive) \(subURL.absoluteString): \(error.localizedDescription)\n" }
+                            }
+                        }
+                    }
+                    break
+                }
+            } catch {
+                // Ignore and try next index type
+            }
+        }
+        if !foundListing {
+            await MainActor.run { logOutput += "No directory listing found at \(baseURL.absoluteString), wget-style fallback could not enumerate subfiles.\n" }
+        }
+        await MainActor.run {
+            logOutput += "Recursive mirror complete.\n"
+            isRunning = false
+            downloadTask = nil
+            isPaused = false
+            showOpenFolderButton = (repoFolderURL != nil && fileManager.fileExists(atPath: repoFolderURL!.path))
+        }
     }
 }
 

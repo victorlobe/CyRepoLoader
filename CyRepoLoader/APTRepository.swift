@@ -43,11 +43,12 @@ class APTRepository {
     /// Decompresses GZIP data using the Compression framework
     private func decompressGzip(data: Data) -> Data? {
         var dstBuffer = Data(count: 10 * data.count)
+        let dstBufferCount = dstBuffer.count
         let decompressedSize = dstBuffer.withUnsafeMutableBytes { dstPtr in
             data.withUnsafeBytes { srcPtr in
                 compression_decode_buffer(
                     dstPtr.bindMemory(to: UInt8.self).baseAddress!,
-                    dstBuffer.count,
+                    dstBufferCount,
                     srcPtr.bindMemory(to: UInt8.self).baseAddress!,
                     data.count,
                     nil,
