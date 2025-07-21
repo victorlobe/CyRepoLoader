@@ -4,7 +4,7 @@ A native macOS utility to download and mirror Cydia repositories using modern Sw
 
 ## ✨ Features
 
-- 🔗 Enter or paste any Cydia repo URL (http or https)  
+- 🔗 Enter or paste any Cydia repo URL
 - 📁 Choose your download destination folder (with drag-and-drop support)  
 - 📜 View real time download progress and logs  
 - 🛑 Cancel downloads anytime  
@@ -18,12 +18,11 @@ A native macOS utility to download and mirror Cydia repositories using modern Sw
 - macOS 12.0+  
 
 ## 📸 Screenshots
-<img width="801" height="522" alt="Bildschirmfoto 2025-07-22 um 00 17 49" src="https://github.com/user-attachments/assets/4e4b3235-ef78-446b-9e56-bfa691127406" />
 
-<img width="801" height="<img width="801" height="522" alt="Bildschirmfoto 2025-07-22 um 00 19 27" src="https://github.com/user-attachments/assets/cb1e4238-2558-4817-8dc8-db0bf9c85d47" />
-522" alt="Bildschirmfoto 2025-07-22 um 00 18 12" src="https://github.com/user-attachments/assets/83f8153d-00be-4663-a9e1-08cbf56ede6a" />
-
-![Uploading Bildschirmfoto 2025-07-22 um 00.19.27.png…]()
+<img width="1012" height="692" alt="Screenshot1" src="https://github.com/user-attachments/assets/a518618b-032c-41ba-8f39-0a4b26e1f18e" />
+<img width="1012" height="692" alt="Screenshot2" src="https://github.com/user-attachments/assets/fc776fc0-a3ee-48d3-905c-f72112ff27a4" />
+<img width="1012" height="692" alt="Screenshot3" src="https://github.com/user-attachments/assets/8e17ec81-5db1-498d-9008-eac3702c6542" />
+<img width="1012" height="692" alt="Screenshot4" src="https://github.com/user-attachments/assets/f7b3e54b-5e97-4282-9b89-e839860a0d0c" />
 
 
 ## 🚀 How to Use
