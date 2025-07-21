@@ -1,26 +1,21 @@
 # Cydia Repo Downloader (SwiftUI)
 
-A native macOS utility to download and mirror Cydia repositories with a modern, clean SwiftUI interface.  
-Powered by `wget` under the hood.
+A native macOS utility to download and mirror Cydia repositories using modern SwiftUI and pure Swift networking.
 
 ## ✨ Features
 
-- 🔗 Enter or paste any Cydia repo URL (`http` or `https`)
-- 📁 Choose your download destination folder
-- 📜 View real-time download logs in a live console
-- ⏸️ Pause, resume, and cancel downloads anytime
-- 🧠 Automatically remembers recent URLs
-- 🧹 Clears old logs before each download
-- 📂 Open the download folder directly after completion
-- 📥 Full mirror using `wget` (`--mirror`, `--no-parent`, etc.)
-- 🧠 Intelligent error highlighting (404s, network failures, etc.)
-- 🧪 Drag-and-drop folder support
-- 🌗 Fully native, SwiftUI-based, fast and lightweight
+- 🔗 Enter or paste any Cydia repo URL (http or https)  
+- 📁 Choose your download destination folder (with drag-and-drop support)  
+- 📜 View real time download progress and logs  
+- 🛑 Cancel downloads anytime  
+- 🧠 Automatically remembers recent repo URLs  
+- 📥 Full repo mirror: All .deb files and metadata of the repo are saved.
+- 🧠 Error detection and summary display for failed downloads  
+- 🌗 Fully native, SwiftUI based, fast and lightweight  
 
 ## 🧰 Requirements
 
-- macOS 12.0+
-- `wget` installed (via [Homebrew](https://brew.sh): `brew install wget`)
+- macOS 12.0+  
 
 ## 📸 Screenshots
 
@@ -31,27 +26,23 @@ Powered by `wget` under the hood.
 1. **Enter a Cydia Repo URL**, e.g.  
    `http://repo.victorlobe.me`
 
-2. **Choose a destination folder** where the mirror will be saved
+2. **Choose a destination folder**
 
 3. **Click “Start Download”**
 
-4. Sit back and monitor progress in the real-time log
+4. Sit back and monitor the progress in the real time.
 
 5. When done, click **“Open Folder”** to access the full repo mirror
 
 ## 🛑 Notes
 
-- This tool mirrors the full repo structure including `Packages`, `.deb` files, and metadata.
-- Errors and missing files will be logged to `wget-errors.log` inside the repo folder.
-- Temporary logs are saved as `wget.log` in the destination folder.
+- This tool mirrors the full repo structure including `Packages`, `.deb` files, and metadata.  
+- Errors and missing files will be indicated in the app's error summary.  
+- Temporary logs and progress are displayed live within the app interface.
 
 ## 🧠 Behind the Scenes
 
-Uses the following `wget` options:
-
-```bash
-wget --mirror --no-parent --convert-links --restrict-file-names=windows --wait=1 -e robots=off <REPO_URL>
-```
+All mirroring is done natively using Swift and URLSession with custom logic to parse repo metadata and download repository files efficiently.
 
 👨‍💻 Author
 
@@ -62,4 +53,3 @@ Made with ❤️ by Victor Lobe
 MIT License – Free to use, share, and modify.
 
 ---
-Yes, this Readme was created with ChatGPT because i´m too lazy to make a proper one.
