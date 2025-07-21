@@ -20,12 +20,33 @@ struct ContentView: View {
     @State private var errorOutput: String = ""
     @State private var showingPicker = false
     @State private var shouldAutoScroll: Bool = true
+    @State private var isAtBottom: Bool = true
     @State private var downloadTask: URLSessionDownloadTask? = nil
     @State private var isPaused: Bool = false
+
+    @State private var mirrorTask: Task<Void, Never>? = nil
     
     @State private var showOpenFolderButton: Bool = false
-    
+
     @State private var selectedScheme: String = "https"
+    private let selectedSchemeKey = "selectedScheme"
+    
+    @State private var downloadSummary: String? = nil
+    
+    // MARK: - Added state variables for simple log mode and progress tracking
+    @State private var simpleLogMode: Bool = true
+    @State private var progress: Double = 0
+    @State private var filesTotal: Int = 0
+    @State private var filesDownloaded: Int = 0
+    
+    // MARK: - New state variable for progress phase display in simple log mode
+    @State private var progressPhase: String = ""
+    
+    // *** New state variable for last download folder URL ***
+    @State private var lastDownloadFolderURL: URL? = nil
+
+    // Deduplication set for recursive mirror URLs
+    private var alreadyMirroredURLs = Set<String>()
     
     private var versionString: String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
@@ -46,7 +67,7 @@ struct ContentView: View {
         ZStack(alignment: .topTrailing) {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 6) {
-                    Text("Cydia Repo Utility")
+                    Text("CyRepoLoader")
                         .font(.title2)
                         .bold()
                     Text("by Victor")
@@ -55,14 +76,15 @@ struct ContentView: View {
                 }
                 HStack {
                     Picker("", selection: $selectedScheme) {
-                        Text("").tag("")
                         Text("http://").tag("http")
                         Text("https://").tag("https")
+                        Text("Custom").tag("")
                     }
                     .pickerStyle(.menu)
                     .frame(width: 90)
                     .onChange(of: selectedScheme) { _ in
                         repoURL = repoURL.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "^https?://", with: "", options: .regularExpression)
+                        UserDefaults.standard.set(selectedScheme, forKey: selectedSchemeKey)
                     }
                     TextField("Cydia Repo URL", text: $repoURL)
                         .textFieldStyle(.roundedBorder)
@@ -76,8 +98,9 @@ struct ContentView: View {
                                 downloadTask = nil
                                 showOpenFolderButton = false
                                 errorOutput = ""
+                                downloadSummary = nil
                                 logOutput = ""
-                                Task { await mirrorRepo() }
+                                mirrorTask = Task { await mirrorRepo() }
                             }
                         }
                 }
@@ -107,6 +130,8 @@ struct ContentView: View {
                             errorOutput = "Directory selection failed: \(error.localizedDescription)"
                         }
                     }
+                    Toggle("Full Log", isOn: .init(get: { !simpleLogMode }, set: { simpleLogMode = !$0 }))
+                        .padding(.leading, 8)
                 }
                 .onDrop(of: [.fileURL], isTargeted: nil) { providers in
                     var foundValidFolder = false
@@ -159,8 +184,9 @@ struct ContentView: View {
                         downloadTask = nil
                         showOpenFolderButton = false
                         errorOutput = "" // Reset errors when starting a new download
+                        downloadSummary = nil
                         logOutput = ""   // Clear log only when starting a new download
-                        Task { await mirrorRepo() }
+                        mirrorTask = Task { await mirrorRepo() }
                     }
                     .disabled(isRunning || repoURL.isEmpty || destDir.isEmpty)
                     .buttonStyle(.borderedProminent)
@@ -170,25 +196,120 @@ struct ContentView: View {
                             cancelDownload()
                         }
                         .buttonStyle(.bordered)
-
-                        // Pause/Resume disabled for now because URLSession tasks are not trivially pausable
-                        /*
-                        if isPaused {
-                            Button("Resume") {
-                                resumeDownload()
-                            }
-                            .buttonStyle(.bordered)
-                        } else {
-                            Button("Pause") {
-                                pauseDownload()
-                            }
-                            .buttonStyle(.bordered)
+                    }
+                    // New "Show in Finder" button per instructions
+                    if !isRunning, let downloadURL = lastDownloadFolderURL {
+                        Button {
+                            NSWorkspace.shared.open(downloadURL)
+                        } label: {
+                            Label("Show in Finder", systemImage: "folder")
                         }
-                        */
+                        .buttonStyle(.bordered)
                     }
                 }
-
-                if !errorOutput.isEmpty {
+                
+                // MARK: - Removed old Toggle here
+                
+                // MARK: - Conditionally show simple progress bar or full log output ScrollView
+                if simpleLogMode {
+                    VStack(alignment: .leading) {
+                        if isRunning || filesTotal > 0 {
+                            Text(progressPhase)
+                                .font(.subheadline) // New
+                                .foregroundColor(.primary) // New
+                            
+                            ProgressView(value: filesTotal > 0 ? min(max(progress, 0.0), 1.0) : 0.0)
+                                .progressViewStyle(LinearProgressViewStyle())
+                                .frame(maxWidth: .infinity)
+                            
+                            Text("Downloading \(filesDownloaded) of \(filesTotal) (.deb files)...")
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                                .padding(.top, 2)
+                        }
+                        if let summary = downloadSummary, summary.localizedCaseInsensitiveContains("error") || summary.localizedCaseInsensitiveContains("failed") {
+                            Text(summary)
+                                .padding(.top, 6)
+                                .foregroundColor(summary.localizedCaseInsensitiveContains("error") || summary.localizedCaseInsensitiveContains("failed") ? .red : .green)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                } else {
+                    // Always show logOutput ScrollView, never hide or clear it except when starting new download
+                    ScrollViewReader { proxy in
+                        ZStack(alignment: .bottomTrailing) {
+                            GeometryReader { geometry in
+                                ScrollView {
+                                    VStack(alignment: .leading, spacing: 0) {
+                                        Text(logOutput)
+                                            .textSelection(.enabled)
+                                            .font(.system(.footnote, design: .monospaced))
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .padding(8)
+                                        Color.clear.frame(height: 1).id("logEnd")
+                                    }
+                                    // Background GeometryReader for total content height to track lastLogHeight
+                                    .background(GeometryReader { innerGeo in
+                                        Color.clear.preference(key: LogScrollBottomKey.self, value: innerGeo.frame(in: .global).maxY)
+                                    })
+                                }
+                                .frame(maxHeight: 250)
+                                .gesture(
+                                    DragGesture().onChanged { _ in
+                                        // User started dragging (scrolling), disable auto-scroll
+                                        shouldAutoScroll = false
+                                    }
+                                )
+                                // Update isAtBottom and shouldAutoScroll based on scroll position
+                                .onPreferenceChange(LogScrollBottomKey.self) { value in
+                                    let scrollViewFrameMaxY = geometry.frame(in: .global).maxY
+                                    // If content bottom (value) is less or equal to scrollView bottom + threshold, consider at bottom
+                                    if value <= scrollViewFrameMaxY + 10.0 {
+                                        isAtBottom = true
+                                        shouldAutoScroll = true
+                                    } else {
+                                        isAtBottom = false
+                                        shouldAutoScroll = false
+                                    }
+                                }
+                                .onAppear {
+                                    // On appear, assume at bottom and enable auto-scroll
+                                    isAtBottom = true
+                                    shouldAutoScroll = true
+                                }
+                                // Only auto-scroll when user has not manually scrolled up
+                                .onChange(of: logOutput) { _ in
+                                    if shouldAutoScroll {
+                                        withAnimation {
+                                            proxy.scrollTo("logEnd", anchor: .bottom)
+                                        }
+                                    }
+                                }
+                            }
+                            if !isAtBottom {
+                                Button(action: {
+                                    withAnimation {
+                                        proxy.scrollTo("logEnd", anchor: .bottom)
+                                    }
+                                    // User pressed "scroll to bottom" button, enable auto-scroll
+                                    shouldAutoScroll = true
+                                    isAtBottom = true
+                                }) {
+                                    Image(systemName: "arrow.down.to.line")
+                                        .padding(8)
+                                        .background(Color.gray.opacity(0.7))
+                                        .clipShape(Circle())
+                                        .foregroundColor(.white)
+                                        .shadow(radius: 3)
+                                }
+                                .padding([.trailing, .bottom], 12)
+                            }
+                        }
+                    }
+                }
+                
+                if !isRunning && !errorOutput.isEmpty {
                     Text(errorOutput)
                         .foregroundColor(errorOutput.localizedCaseInsensitiveContains("warning") ? .orange : .red)
                         .padding(8)
@@ -196,35 +317,31 @@ struct ContentView: View {
                         .cornerRadius(6)
                         .padding(.top, 5)
                 }
-
-                // Always show logOutput ScrollView, never hide or clear it except when starting new download
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        Text(logOutput)
-                            .textSelection(.enabled)
-                            .font(.system(.footnote, design: .monospaced))
+                
+                if !isRunning, showOpenFolderButton, let repoFolderURL = repoFolderURL, FileManager.default.fileExists(atPath: repoFolderURL.path) {
+                    Text("Download finished. You can open the download folder below.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 8)
+                    
+                    if let summary = downloadSummary, summary.localizedCaseInsensitiveContains("error") || summary.localizedCaseInsensitiveContains("failed") {
+                        Text(summary)
+                            .padding(.vertical, 6)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(8)
-                        Color.clear.frame(height: 1).id("logEnd")
+                            .foregroundColor(summary.localizedCaseInsensitiveContains("error") || summary.localizedCaseInsensitiveContains("failed") ? .red : .green)
                     }
-                    .frame(maxHeight: 250)
-                    .gesture(
-                        DragGesture()
-                            .onChanged { _ in
-                                shouldAutoScroll = false
-                            }
-                    )
-                    .onChange(of: logOutput) { _ in
-                        if shouldAutoScroll {
-                            withAnimation {
-                                proxy.scrollTo("logEnd", anchor: .bottom)
-                            }
-                        }
+                    
+                    Button("Open Folder") {
+                        openRepoFolder()
                     }
+                    .buttonStyle(.borderedProminent)
+                    .padding(.top, 4)
                 }
                 
+                Spacer()
+                
                 if !repoHistory.isEmpty {
-                    Text("Recent URLs")
+                    Text("History")
                         .font(.headline)
                         .padding(.top, 4)
                     ScrollView {
@@ -267,24 +384,15 @@ struct ContentView: View {
                     }
                     .frame(maxHeight: 200)
                 }
-                
-                if !isRunning, showOpenFolderButton, let repoFolderURL = repoFolderURL, FileManager.default.fileExists(atPath: repoFolderURL.path) {
-                    Text("Download finished. You can open the download folder below.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 8)
-                    Button("Open Folder") {
-                        openRepoFolder()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .padding(.top, 4)
-                }
             }
             .padding()
             .onAppear {
                 let defaults = UserDefaults.standard
                 destDir = defaults.string(forKey: "destDir") ?? ""
                 repoHistory = defaults.stringArray(forKey: "repoHistory") ?? []
+                if let savedScheme = UserDefaults.standard.string(forKey: selectedSchemeKey), !savedScheme.isEmpty {
+                    selectedScheme = savedScheme
+                }
             }
             HStack {
                 Spacer()
@@ -316,16 +424,21 @@ struct ContentView: View {
     }
 
     func cancelDownload() {
-        if let task = downloadTask {
-            task.cancel()
-            Task { await MainActor.run {
-                errorOutput = "Download cancelled by user."
-                isRunning = false
-                downloadTask = nil
-                isPaused = false
-                showOpenFolderButton = false
-            }}
-        }
+        mirrorTask?.cancel()
+        mirrorTask = nil
+        Task { await MainActor.run {
+            errorOutput = "Download cancelled by user."
+            downloadSummary = nil
+            isRunning = false
+            downloadTask = nil
+            isPaused = false
+            showOpenFolderButton = false
+            progress = 0
+            filesDownloaded = 0
+            filesTotal = 0
+            // MARK: - Set progressPhase to "Download cancelled" on cancel
+            progressPhase = "Download cancelled"
+        }}
     }
 
     func pauseDownload() {
@@ -336,11 +449,17 @@ struct ContentView: View {
         // Pause/resume disabled for now
     }
 
-    // MARK: - New mirrorRepo implementation
+    // MARK: - New mirrorRepo implementation with simpleLogMode progress tracking
     
     func mirrorRepo() async {
+        // MARK: - Reset progressPhase at start
+        await MainActor.run {
+            progressPhase = ""
+        }
+        
         await MainActor.run {
             errorOutput = ""
+            downloadSummary = nil
         }
 
         await MainActor.run {
@@ -348,9 +467,13 @@ struct ContentView: View {
             logOutput = ""
             shouldAutoScroll = true
             showOpenFolderButton = false
+            // Reset progress-related state at start
+            progress = 0
+            filesDownloaded = 0
+            filesTotal = 0
+            // MARK: - Set progressPhase at initial validation phase
+            progressPhase = "Validating URL and destination"
         }
-
-        await MainActor.run { logOutput += "Validating URL and destination directory...\n" }
 
         // Compose final URL string with selected scheme
         let cleanRepoURL = repoURL.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "^https?://", with: "", options: .regularExpression)
@@ -361,14 +484,28 @@ struct ContentView: View {
         guard let baseURL = URL(string: trimmedFinalURL) else {
             await MainActor.run {
                 errorOutput = "Invalid URL: Please enter a valid URL starting with http:// or https://"
+                downloadSummary = nil
                 isRunning = false
+                mirrorTask = nil
+                progress = 0
+                filesDownloaded = 0
+                filesTotal = 0
+                // MARK: - Set progressPhase to error
+                progressPhase = "Error"
             }
             return
         }
         guard let scheme = baseURL.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
             await MainActor.run {
                 errorOutput = "Invalid URL scheme: Use http:// or https://"
+                downloadSummary = nil
                 isRunning = false
+                mirrorTask = nil
+                progress = 0
+                filesDownloaded = 0
+                filesTotal = 0
+                // MARK: - Set progressPhase to error
+                progressPhase = "Error"
             }
             return
         }
@@ -379,7 +516,14 @@ struct ContentView: View {
         guard FileManager.default.fileExists(atPath: expandedDestDir, isDirectory: &isDir), isDir.boolValue else {
             await MainActor.run {
                 errorOutput = "Invalid destination: The download destination must be an existing folder."
+                downloadSummary = nil
                 isRunning = false
+                mirrorTask = nil
+                progress = 0
+                filesDownloaded = 0
+                filesTotal = 0
+                // MARK: - Set progressPhase to error
+                progressPhase = "Error"
             }
             return
         }
@@ -393,12 +537,22 @@ struct ContentView: View {
         } catch {
             await MainActor.run {
                 errorOutput = "Failed to create destination directory: \(error.localizedDescription)"
+                downloadSummary = nil
                 isRunning = false
+                mirrorTask = nil
+                progress = 0
+                filesDownloaded = 0
+                filesTotal = 0
+                // MARK: - Set progressPhase to error
+                progressPhase = "Error"
             }
             return
         }
 
-        await MainActor.run { logOutput += "Checking repo metadata files...\n" }
+        // MARK: - Set progressPhase when searching metadata files
+        await MainActor.run { logOutput += "Checking repo metadata files...\n"
+            progressPhase = "Searching repo metadata files..."
+        }
 
         let fileManager = FileManager.default
 
@@ -453,6 +607,35 @@ struct ContentView: View {
                 metadataData = data
                 metadataFileName = filename
                 break outerLoop
+            }
+        }
+
+        // Always try the classic subpath for Cydia repos (BigBoss etc), even if no Release file exists
+        if foundMetadataURL == nil {
+            let classicSubpath = "/dists/stable/main/binary-iphoneos-arm/"
+            if let classicURL = URL(string: classicSubpath, relativeTo: baseURL)?.absoluteURL {
+                for filename in ["Packages", "Packages.gz", "Packages.bz2"] {
+                    if let data = await tryMetadataFile(base: classicURL, filename: filename) {
+                        foundMetadataURL = classicURL.appendingPathComponent(filename)
+                        metadataData = data
+                        metadataFileName = filename
+                        repoBaseURL = classicURL
+                        break
+                    }
+                }
+            }
+        }
+
+        // Expliziter BigBoss-Debian-Standardpfad-Test: try /dists/stable/main/binary-iphoneos-arm/Packages.bz2 explicitly
+        let debianPackagesBZ2 = "dists/stable/main/binary-iphoneos-arm/Packages.bz2"
+        if foundMetadataURL == nil {
+            if let debianURL = URL(string: debianPackagesBZ2, relativeTo: baseURL)?.absoluteURL {
+                if let data = await tryMetadataFile(base: debianURL.deletingLastPathComponent(), filename: "Packages.bz2") {
+                    foundMetadataURL = debianURL
+                    metadataData = data
+                    metadataFileName = "Packages.bz2"
+                    repoBaseURL = debianURL.deletingLastPathComponent()
+                }
             }
         }
 
@@ -555,58 +738,120 @@ struct ContentView: View {
         guard let metadataURL = foundMetadataURL, let metadata = metadataData, let metadataName = metadataFileName else {
             await MainActor.run {
                 errorOutput = "Failed to locate repo metadata files (Release, Packages, Packages.bz2, or Packages.gz)."
+                downloadSummary = nil
                 isRunning = false
+                mirrorTask = nil
+                progress = 0
+                filesDownloaded = 0
+                filesTotal = 0
+                // MARK: - Set progressPhase to error
+                progressPhase = "Error"
             }
             return
+        }
+
+        // MARK: - Set progressPhase when parsing Packages file
+        if metadataName == "Packages" {
+            await MainActor.run { logOutput += "Parsing Packages file...\n"
+                progressPhase = "Parsing Packages file..."
+            }
+        } else if metadataName == "Packages.gz" {
+            await MainActor.run { logOutput += "Parsing Packages.gz file...\n"
+                progressPhase = "Parsing Packages.gz file..."
+            }
+        } else if metadataName == "Packages.bz2" {
+            await MainActor.run { logOutput += "Parsing Packages.bz2 file...\n"
+                progressPhase = "Parsing Packages.bz2 file..."
+            }
         }
 
         // Parse Packages or compressed Packages files for .deb relative paths if applicable
         var debRelativePaths: [String] = []
         if metadataName == "Packages" {
-            await MainActor.run { logOutput += "Parsing Packages file...\n" }
-            debRelativePaths = parsePackagesFile(metadata)
+            debRelativePaths = await parsePackagesFile(metadata)
             if debRelativePaths.isEmpty {
                 await MainActor.run {
                     errorOutput = "No .deb file URLs found in Packages file."
+                    downloadSummary = nil
                     isRunning = false
+                    mirrorTask = nil
+                    progress = 0
+                    filesDownloaded = 0
+                    filesTotal = 0
+                    // MARK: - Set progressPhase to error
+                    progressPhase = "Error"
                 }
                 return
             }
         } else if metadataName == "Packages.gz" {
-            await MainActor.run { logOutput += "Parsing Packages.gz file...\n" }
             do {
                 let packagesData = try decompressGzip(data: metadata)
-                debRelativePaths = parsePackagesFile(packagesData)
+                debRelativePaths = await parsePackagesFile(packagesData)
                 if debRelativePaths.isEmpty {
                     await MainActor.run {
                         errorOutput = "No .deb file URLs found in Packages.gz file."
+                        downloadSummary = nil
                         isRunning = false
+                        mirrorTask = nil
+                        progress = 0
+                        filesDownloaded = 0
+                        filesTotal = 0
+                        // MARK: - Set progressPhase to error
+                        progressPhase = "Error"
                     }
                     return
                 }
             } catch {
                 await MainActor.run {
                     errorOutput = "Failed to parse Packages.gz file: \(error.localizedDescription)"
+                    downloadSummary = nil
                     isRunning = false
+                    mirrorTask = nil
+                    progress = 0
+                    filesDownloaded = 0
+                    filesTotal = 0
+                    // MARK: - Set progressPhase to error
+                    progressPhase = "Error"
                 }
                 return
             }
         } else if metadataName == "Packages.bz2" {
-            await MainActor.run { logOutput += "Parsing Packages.bz2 file...\n" }
             do {
                 let packagesData = try decompressBz2(data: metadata)
-                debRelativePaths = parsePackagesFile(packagesData)
+                await MainActor.run { logOutput += "Packages.bz2 dekomprimiert, size: \(packagesData.count) Bytes\n" }
+                if let content = String(data: packagesData, encoding: .utf8) {
+                    await MainActor.run { logOutput += "--- Packages.bz2 Preview (UTF-8, first 1000 chars):\n\(content.prefix(1000))\n------------------------------\n" }
+                } else if let content = String(data: packagesData, encoding: .isoLatin1) {
+                    await MainActor.run { logOutput += "--- Packages.bz2 Preview (Latin1, first 1000 chars):\n\(content.prefix(1000))\n------------------------------\n" }
+                } else {
+                    await MainActor.run { logOutput += "Konnte Packages.bz2 nicht als UTF-8 oder Latin1 dekodieren.\n" }
+                }
+                debRelativePaths = await parsePackagesFile(packagesData)
                 if debRelativePaths.isEmpty {
                     await MainActor.run {
                         errorOutput = "No .deb file URLs found in Packages.bz2 file."
+                        downloadSummary = nil
                         isRunning = false
+                        mirrorTask = nil
+                        progress = 0
+                        filesDownloaded = 0
+                        filesTotal = 0
+                        // MARK: - Set progressPhase to error
+                        progressPhase = "Error"
                     }
                     return
                 }
             } catch {
                 await MainActor.run {
                     errorOutput = "BZ2 decompression not supported yet. Cannot parse Packages.bz2."
+                    downloadSummary = nil
                     isRunning = false
+                    mirrorTask = nil
+                    progress = 0
+                    filesDownloaded = 0
+                    filesTotal = 0
+                    // MARK: - Set progressPhase to error
+                    progressPhase = "Error"
                 }
                 return
             }
@@ -616,22 +861,46 @@ struct ContentView: View {
             return
         }
 
+        // MARK: - Set progressPhase when preparing download list
+        await MainActor.run {
+            progressPhase = "Preparing download list..."
+        }
+
         // Now join each relative path with repoBaseURL safely to form absolute URLs to download
         var debURLs: [URL] = []
+        let repoRootURL: URL
+        if let host = baseURL.host {
+            // Nur das Protokoll + Host + evtl. Pfad bis "cydia"
+            var comps = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+            comps?.path = "/repofiles/cydia/"
+            repoRootURL = comps?.url ?? baseURL
+        } else {
+            repoRootURL = baseURL
+        }
         for relativePath in debRelativePaths {
             if let url = URL(string: relativePath), url.scheme == nil {
-                // relative path - join with repoBaseURL
-                let combinedURL = repoBaseURL.appendingPathComponent(relativePath)
-                debURLs.append(combinedURL)
+                // Prüfe auf BigBoss: beginnt mit "debs2.0/"
+                if relativePath.hasPrefix("debs2.0/") {
+                    let combinedURL = repoRootURL.appendingPathComponent(relativePath)
+                    debURLs.append(combinedURL)
+                } else {
+                    let combinedURL = repoBaseURL.appendingPathComponent(relativePath)
+                    debURLs.append(combinedURL)
+                }
             } else if let url = URL(string: relativePath) {
-                // absolute URL (with http/https)
                 debURLs.append(url)
             }
         }
+        // Damit werden für BigBoss und ähnlich strukturierte Repos die .deb-Downloads korrekt erzeugt.
 
-        // Start downloading all .deb files one by one
+        // MARK: - Setup progress tracking before download loop and update phase
         await MainActor.run {
             logOutput += "Starting download of \(debURLs.count) .deb files...\n"
+            filesTotal = debURLs.count
+            filesDownloaded = 0
+            progress = 0
+            // MARK: - Update progressPhase for downloading
+            progressPhase = "Downloading .deb files..."
         }
 
         // Save to history
@@ -639,10 +908,11 @@ struct ContentView: View {
             saveHistoryURL(trimmedFinalURL)
         }
 
+        var downloadIssues: [String] = []
+
         // Download .deb files in sequence to preserve order and progress display
         for (index, debURL) in debURLs.enumerated() {
-            if !isRunning {
-                await MainActor.run { logOutput += "Download cancelled.\n" }
+            if Task.isCancelled || !isRunning {
                 break
             }
 
@@ -663,7 +933,9 @@ struct ContentView: View {
                 try fileManager.createDirectory(at: localDir, withIntermediateDirectories: true, attributes: nil)
             } catch {
                 await MainActor.run {
-                    logOutput += "Failed to create directory \(localDir.path): \(error.localizedDescription)\n"
+                    if !simpleLogMode {
+                        logOutput += "Failed to create directory \(localDir.path): \(error.localizedDescription)\n"
+                    }
                 }
                 continue
             }
@@ -674,7 +946,11 @@ struct ContentView: View {
                     let attrs = try fileManager.attributesOfItem(atPath: localFileURL.path)
                     if let fileSize = attrs[.size] as? UInt64, fileSize > 0 {
                         await MainActor.run {
-                            logOutput += "[\(index+1)/\(debURLs.count)] Skipping existing file: \(localRelativePath)\n"
+                            if !simpleLogMode {
+                                logOutput += "[\(index+1)/\(debURLs.count)] Skipping existing file: \(localRelativePath)\n"
+                            }
+                            filesDownloaded += 1
+                            progress = Double(filesDownloaded) / Double(filesTotal)
                         }
                         continue
                     }
@@ -684,32 +960,82 @@ struct ContentView: View {
             }
 
             await MainActor.run {
-                logOutput += "[\(index+1)/\(debURLs.count)] Downloading: \(localRelativePath)\n"
+                if !simpleLogMode {
+                    logOutput += "[\(index+1)/\(debURLs.count)] Downloading: \(localRelativePath)\n"
+                }
             }
 
             do {
                 let fileData = try await fetchURL(debURL)
                 try fileData.write(to: localFileURL)
                 await MainActor.run {
-                    logOutput += "Saved to \(localFileURL.path)\n"
+                    if !simpleLogMode {
+                        logOutput += "Saved to \(localFileURL.path)\n"
+                    }
+                    // MARK: - Update progress after successful file download
+                    filesDownloaded += 1
+                    progress = Double(filesDownloaded) / Double(filesTotal)
                 }
             } catch {
                 await MainActor.run {
-                    logOutput += "Failed to download \(debURL.absoluteString): \(error.localizedDescription)\n"
+                    if !simpleLogMode {
+                        logOutput += "Failed to download \(debURL.absoluteString): \(error.localizedDescription)\n"
+                    }
                     if errorOutput.isEmpty {
                         errorOutput = "Errors occurred during download. See log for details."
                     }
+                    // Still update progress for failed file (count as downloaded for progress bar)
+                    filesDownloaded += 1
+                    progress = Double(filesDownloaded) / Double(filesTotal)
                 }
+                downloadIssues.append("\(localRelativePath)")
             }
         }
 
+        // Additional step: Mirror anything else in the repo
+        // Recursively mirror all remaining files (icons, banners, html, etc.) for full repo hosting
+        await recursiveMirrorRepo(from: baseURL, to: repoPath) 
+
         await MainActor.run {
-            logOutput += "\nAll done. Your local mirror is at: \(repoPath.path)\n"
-            logOutput += "Download complete.\n"
+            if Task.isCancelled {
+                logOutput += "\nDownload cancelled.\n"
+                downloadSummary = nil
+                // MARK: - Set progressPhase on cancel
+                progressPhase = "Download cancelled"
+            } else {
+                if !simpleLogMode {
+                    logOutput += "\nAll done. Your local mirror is at: \(repoPath.path)\n"
+                    logOutput += "Download complete.\n"
+                }
+                // Clear previous errors on success
+                errorOutput = ""
+                if downloadIssues.isEmpty {
+                    // Removed assignment of downloadSummary = "Success"
+                    // downloadSummary = "Success"
+                } else {
+                    let maxDisplay = 10
+                    let displayList = downloadIssues.prefix(maxDisplay).joined(separator: "\n")
+                    let moreText = downloadIssues.count > maxDisplay ? "\n..." : ""
+                    let baseSummary = "Failed to download \(downloadIssues.count) file(s):\n\(displayList)\(moreText)"
+                    downloadSummary = baseSummary
+                }
+                // *** Updated to set lastDownloadFolderURL and showOpenFolderButton ***
+                if fileManager.fileExists(atPath: repoPath.path) {
+                    lastDownloadFolderURL = repoPath
+                    showOpenFolderButton = true
+                } else {
+                    lastDownloadFolderURL = nil
+                    showOpenFolderButton = false
+                }
+                // MARK: - Set progressPhase on completion
+                progressPhase = "Download complete"
+            }
             isRunning = false
             downloadTask = nil
             isPaused = false
-            showOpenFolderButton = (repoFolderURL != nil && fileManager.fileExists(atPath: repoFolderURL!.path))
+            // MARK: - Ensure progress is set to 1.0 after completion
+            progress = 1.0
+            mirrorTask = nil
         }
     }
 
@@ -733,9 +1059,10 @@ struct ContentView: View {
 
     // MARK: - Parse Packages file to extract .deb relative paths
     
-    // Changed to return relative paths (String) instead of URLs
-    func parsePackagesFile(_ data: Data) -> [String] {
-        guard let content = String(data: data, encoding: .utf8) else { return [] }
+    // Changed to async, returns relative paths (String) instead of URLs, with logging
+    func parsePackagesFile(_ data: Data) async -> [String] {
+        let content = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1)
+        guard let content else { return [] }
         var debRelativePaths: [String] = []
         let lines = content.components(separatedBy: .newlines)
         var currentPackageDict: [String: String] = [:]
@@ -767,6 +1094,10 @@ struct ContentView: View {
         if !currentPackageDict.isEmpty, let debPath = foundDebRelativePath(from: currentPackageDict) {
             debRelativePaths.append(debPath)
         }
+        await MainActor.run { logOutput += "parsePackagesFile: Found \(debRelativePaths.count) .deb-Pfade\n" }
+        if debRelativePaths.isEmpty {
+            await MainActor.run { logOutput += "Erste 500 Zeichen der Packages-Datei zur Diagnose: \n" + (content.prefix(500)) + "\n" }
+        }
         return debRelativePaths
     }
     
@@ -789,78 +1120,86 @@ struct ContentView: View {
     
     /// Recursively download all reachable files from a given base URL to the given destination directory (mimics wget -r)
     func recursiveMirrorRepo(from baseURL: URL, to localDir: URL) async {
-        await MainActor.run { logOutput += "Packages files not found. Falling back to wget-style recursive mirror...\n" }
-        
-        // List of known index files to skip for recursion (already checked above)
-        let skipFiles = Set(["Release", "Packages", "Packages.gz"])
-        let fileManager = FileManager.default
+        await MainActor.run { logOutput += "Recursively mirroring: \(baseURL.absoluteString)\n"
+            progressPhase = "Downloading Metadata..."
+        }
         let session = URLSession.shared
-        
-        // Try to fetch index.html or directory file listing
-        let indexFiles = ["index.html", "index.htm", "Index", ""]
-        var foundListing = false
-        for indexFile in indexFiles {
-            let dirURL = indexFile.isEmpty ? baseURL : baseURL.appendingPathComponent(indexFile)
-            do {
-                let data = try await fetchURL(dirURL)
-                if let html = String(data: data, encoding: .utf8) {
-                    // Find all href links
-                    let pattern = "href=\\\"([^\\\"]+)\\\""
-                    let regex = try? NSRegularExpression(pattern: pattern)
+        let fileManager = FileManager.default
+        // Track visited URLs globally for this session to avoid loops
+        struct Static {
+            static var visited = Set<String>()
+        }
+        let baseString = baseURL.absoluteString
+        guard !Static.visited.contains(baseString) else { return }
+        Static.visited.insert(baseString)
+        // Fetch directory HTML/listing
+        do {
+            let data = try await fetchURL(baseURL)
+            guard let html = String(data: data, encoding: .utf8) else { return }
+            // Extract all href and src attributes
+            let patterns = ["href\\s*=\\s*\"([^\"]+)\"", "src\\s*=\\s*\"([^\"]+)\""]
+            var sublinks: Set<String> = []
+            for pattern in patterns {
+                if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
                     let nsHtml = html as NSString
-                    let matches = regex?.matches(in: html, range: NSRange(location: 0, length: nsHtml.length)) ?? []
-                    var sublinks: [String] = []
+                    let matches = regex.matches(in: html, range: NSRange(location: 0, length: nsHtml.length))
                     for match in matches {
                         if let range = Range(match.range(at: 1), in: html) {
-                            let href = String(html[range])
-                            // Skip parent links
-                            if href == "../" || href.hasPrefix("#") { continue }
-                            // Avoid re-downloading index files
-                            let lastComponent = URL(string: href)?.lastPathComponent ?? (href as NSString).lastPathComponent
-                            if skipFiles.contains(lastComponent) { continue }
-                            sublinks.append(href)
+                            let link = String(html[range])
+                            // Skip parent and in-page links
+                            if link == "../" || link.hasPrefix("#") { continue }
+                            sublinks.insert(link)
                         }
                     }
-                    foundListing = true
-                    for href in sublinks {
-                        // Build new URL and local path
-                        let subURL = URL(string: href, relativeTo: baseURL)?.absoluteURL ?? baseURL.appendingPathComponent(href)
-                        let relativePath = subURL.path.replacingOccurrences(of: baseURL.path, with: "", options: .anchored)
-                        let localFileURL = localDir.appendingPathComponent(relativePath)
-                        if href.hasSuffix("/") {
-                            // Recurse into subdirectory
-                            do {
-                                try fileManager.createDirectory(at: localFileURL, withIntermediateDirectories: true, attributes: nil)
-                            } catch {}
-                            await recursiveMirrorRepo(from: subURL, to: localFileURL)
-                        } else {
-                            // Download file
-                            await MainActor.run { logOutput += "Recursively downloading: \(subURL.absoluteString)\n" }
-                            do {
-                                let fileData = try await fetchURL(subURL)
-                                try fileData.write(to: localFileURL)
-                                await MainActor.run { logOutput += "Saved recursively to \(localFileURL.path)\n" }
-                            } catch {
-                                await MainActor.run { logOutput += "Failed to download (recursive) \(subURL.absoluteString): \(error.localizedDescription)\n" }
-                            }
-                        }
-                    }
-                    break
                 }
-            } catch {
-                // Ignore and try next index type
             }
-        }
-        if !foundListing {
-            await MainActor.run { logOutput += "No directory listing found at \(baseURL.absoluteString), wget-style fallback could not enumerate subfiles.\n" }
+            // Normalize links and deduplicate
+            for link in sublinks {
+                let subURL = URL(string: link, relativeTo: baseURL)?.absoluteURL ?? baseURL.appendingPathComponent(link)
+                let relativePath = subURL.path.replacingOccurrences(of: baseURL.path, with: "", options: .anchored)
+                let localFileURL = localDir.appendingPathComponent(relativePath)
+                let isDirectory = link.hasSuffix("/")
+                if isDirectory {
+                    do { try fileManager.createDirectory(at: localFileURL, withIntermediateDirectories: true, attributes: nil) } catch {}
+                    await recursiveMirrorRepo(from: subURL, to: localFileURL)
+                } else {
+                    await MainActor.run { logOutput += "Recursively downloading: \(subURL.absoluteString)\n" }
+                    do {
+                        // Do not overwrite files already downloaded by the main pass
+                        if !fileManager.fileExists(atPath: localFileURL.path) {
+                            let fileData = try await fetchURL(subURL)
+                            try fileData.write(to: localFileURL)
+                            await MainActor.run { logOutput += "Saved recursively to \(localFileURL.path)\n" }
+                        }
+                    } catch {
+                        await MainActor.run { logOutput += "Failed to download (recursive) \(subURL.absoluteString): \(error.localizedDescription)\n" }
+                    }
+                }
+            }
+        } catch {
+            // Not a directory or not listing, nothing to do
         }
         await MainActor.run {
-            logOutput += "Recursive mirror complete.\n"
+            if Task.isCancelled {
+                logOutput += "\nDownload cancelled.\n"
+                progressPhase = "Download cancelled"
+            } else {
+                progressPhase = "Download complete"
+                downloadSummary = "Recursive mirror complete."
+            }
             isRunning = false
             downloadTask = nil
             isPaused = false
             showOpenFolderButton = (repoFolderURL != nil && fileManager.fileExists(atPath: repoFolderURL!.path))
+            mirrorTask = nil
         }
+    }
+}
+
+struct LogScrollBottomKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 
