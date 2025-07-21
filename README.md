@@ -1,4 +1,4 @@
-# Cydia Repo Downloader (SwiftUI)
+# CyRepoLoader (macOS)
 
 A native macOS utility to download and mirror Cydia repositories using modern SwiftUI and pure Swift networking.
 
@@ -18,8 +18,13 @@ A native macOS utility to download and mirror Cydia repositories using modern Sw
 - macOS 12.0+  
 
 ## 📸 Screenshots
+<img width="801" height="522" alt="Bildschirmfoto 2025-07-22 um 00 17 49" src="https://github.com/user-attachments/assets/4e4b3235-ef78-446b-9e56-bfa691127406" />
 
-> _Coming Soon_
+<img width="801" height="<img width="801" height="522" alt="Bildschirmfoto 2025-07-22 um 00 19 27" src="https://github.com/user-attachments/assets/cb1e4238-2558-4817-8dc8-db0bf9c85d47" />
+522" alt="Bildschirmfoto 2025-07-22 um 00 18 12" src="https://github.com/user-attachments/assets/83f8153d-00be-4663-a9e1-08cbf56ede6a" />
+
+![Uploading Bildschirmfoto 2025-07-22 um 00.19.27.png…]()
+
 
 ## 🚀 How to Use
 
