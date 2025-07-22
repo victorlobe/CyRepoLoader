@@ -21,11 +21,10 @@
 
 ## ✨ Features
 
-- 🔗 Enter or paste any Cydia repo URL
-- 📁 Choose your download destination folder (with drag-and-drop support)  
-- 📜 View real time download progress and logs  
+- 🔗 Make an archive of every Cydia (or Installer) repo.
+- 📜 View real time download progress and logs
+- - 🧠 Automatically remembers recent repo URLs  
 - 🛑 Cancel downloads anytime  
-- 🧠 Automatically remembers recent repo URLs  
 - 📥 Full repo mirror: All .deb files and metadata of the repo are saved.
 - 🧠 Error detection and summary display for failed downloads  
 - 🌗 Fully native, SwiftUI based, fast and lightweight  
@@ -75,3 +74,5 @@ Made with ❤️ by Victor Lobe
 MIT License – Free to use, share, and modify.
 
 ---
+
+Yes, ChatGPT helped me with this Readme.
