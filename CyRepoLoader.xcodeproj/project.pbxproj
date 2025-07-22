@@ -7,10 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		5730187E2E2EEFB400BE1B46 /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 5730187D2E2EEFB400BE1B46 /* README.md */; };
 		57F15EC52E2AEE8E0005062F /* SWCompression in Frameworks */ = {isa = PBXBuildFile; productRef = 57F15EC42E2AEE8E0005062F /* SWCompression */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		5730187D2E2EEFB400BE1B46 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		57C45F0B2E2851BD00E1391C /* CyRepoLoader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CyRepoLoader.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -50,6 +52,7 @@
 		57C45F022E2851BD00E1391C = {
 			isa = PBXGroup;
 			children = (
+				5730187D2E2EEFB400BE1B46 /* README.md */,
 				57C45F0D2E2851BD00E1391C /* CyRepoLoader */,
 				57C45F0C2E2851BD00E1391C /* Products */,
 			);
@@ -131,6 +134,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5730187E2E2EEFB400BE1B46 /* README.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -275,7 +279,7 @@
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = F6ZD5PBKMC;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -289,13 +293,14 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = CyRepoLoader/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CyRepoLoader;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 12.0;
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.victorlobe.CyRepoLoader;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -322,7 +327,7 @@
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = F6ZD5PBKMC;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -336,13 +341,14 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = CyRepoLoader/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CyRepoLoader;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 12.0;
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.victorlobe.CyRepoLoader;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;

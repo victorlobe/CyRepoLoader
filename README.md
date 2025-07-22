@@ -43,6 +43,7 @@ A native macOS utility to download and mirror Cydia repositories using modern Sw
 - This tool mirrors the full repo structure including `Packages`, `.deb` files, and metadata.  
 - Errors and missing files will be indicated in the app's error summary.  
 - Temporary logs and progress are displayed live within the app interface.
+- To compile this project on older Xcode Versions than Xcode 26 you maybe have to remove the AppIcon.icon file in the CyRepoLoader Folder.
 
 ## 🧠 Behind the Scenes
 

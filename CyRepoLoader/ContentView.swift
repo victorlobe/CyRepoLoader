@@ -461,6 +461,15 @@ struct ContentView: View {
             errorOutput = ""
             downloadSummary = nil
         }
+        
+        // Log start of session with selected repo and destination
+        await MainActor.run {
+            if !simpleLogMode {
+                logOutput += "Starting download session.\n"
+                logOutput += "Repo URL (selected scheme + repoURL): \(selectedScheme.isEmpty ? "" : selectedScheme + "://")\(repoURL.trimmingCharacters(in: .whitespacesAndNewlines))\n"
+                logOutput += "Download destination directory: \(destDir)\n"
+            }
+        }
 
         await MainActor.run {
             isRunning = true
@@ -481,8 +490,16 @@ struct ContentView: View {
 
         // Validate finalURLString
         let trimmedFinalURL = finalURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        await MainActor.run {
+            if !simpleLogMode {
+                logOutput += "Validating URL: \(trimmedFinalURL)\n"
+            }
+        }
         guard let baseURL = URL(string: trimmedFinalURL) else {
             await MainActor.run {
+                if !simpleLogMode {
+                    logOutput += "Invalid URL format.\n"
+                }
                 errorOutput = "Invalid URL: Please enter a valid URL starting with http:// or https://"
                 downloadSummary = nil
                 isRunning = false
@@ -497,6 +514,9 @@ struct ContentView: View {
         }
         guard let scheme = baseURL.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
             await MainActor.run {
+                if !simpleLogMode {
+                    logOutput += "Invalid URL scheme: \(baseURL.scheme ?? "none")\n"
+                }
                 errorOutput = "Invalid URL scheme: Use http:// or https://"
                 downloadSummary = nil
                 isRunning = false
@@ -509,12 +529,25 @@ struct ContentView: View {
             }
             return
         }
+        await MainActor.run {
+            if !simpleLogMode {
+                logOutput += "URL scheme is valid: \(scheme)\n"
+            }
+        }
 
         // Validate destDir
         let expandedDestDir = (destDir as NSString).expandingTildeInPath
+        await MainActor.run {
+            if !simpleLogMode {
+                logOutput += "Validating destination directory: \(expandedDestDir)\n"
+            }
+        }
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: expandedDestDir, isDirectory: &isDir), isDir.boolValue else {
             await MainActor.run {
+                if !simpleLogMode {
+                    logOutput += "Invalid destination directory: does not exist or not a directory.\n"
+                }
                 errorOutput = "Invalid destination: The download destination must be an existing folder."
                 downloadSummary = nil
                 isRunning = false
@@ -527,6 +560,11 @@ struct ContentView: View {
             }
             return
         }
+        await MainActor.run {
+            if !simpleLogMode {
+                logOutput += "Destination directory is valid.\n"
+            }
+        }
 
         // Create repo folder path
         let urlHost = baseURL.host ?? "repo"
@@ -534,8 +572,16 @@ struct ContentView: View {
 
         do {
             try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true, attributes: nil)
+            await MainActor.run {
+                if !simpleLogMode {
+                    logOutput += "Created repo directory at \(repoPath.path)\n"
+                }
+            }
         } catch {
             await MainActor.run {
+                if !simpleLogMode {
+                    logOutput += "Failed to create repo directory: \(error.localizedDescription)\n"
+                }
                 errorOutput = "Failed to create destination directory: \(error.localizedDescription)"
                 downloadSummary = nil
                 isRunning = false
@@ -550,7 +596,10 @@ struct ContentView: View {
         }
 
         // MARK: - Set progressPhase when searching metadata files
-        await MainActor.run { logOutput += "Checking repo metadata files...\n"
+        await MainActor.run {
+            if !simpleLogMode {
+                logOutput += "Checking repo metadata files...\n"
+            }
             progressPhase = "Searching repo metadata files..."
         }
 
@@ -589,12 +638,24 @@ struct ContentView: View {
             }
             for url in candidateURLs {
                 do {
-                    await MainActor.run { logOutput += "Trying \(url.absoluteString)...\n" }
+                    await MainActor.run { 
+                        if !simpleLogMode {
+                            logOutput += "Trying \(url.absoluteString)...\n"
+                        }
+                    }
                     let data = try await fetchURL(url)
-                    await MainActor.run { logOutput += "Found \(filename) at \(url.absoluteString)\n" }
+                    await MainActor.run { 
+                        if !simpleLogMode {
+                            logOutput += "Found \(filename) at \(url.absoluteString)\n"
+                        }
+                    }
                     return data
                 } catch {
-                    await MainActor.run { logOutput += "Not found or error fetching \(filename) at \(url.absoluteString): \(error.localizedDescription)\n" }
+                    await MainActor.run { 
+                        if !simpleLogMode {
+                            logOutput += "Not found or error fetching \(filename) at \(url.absoluteString): \(error.localizedDescription)\n"
+                        }
+                    }
                 }
             }
             return nil
@@ -680,7 +741,11 @@ struct ContentView: View {
         }
 
         if suite != nil || codename != nil {
-            await MainActor.run { logOutput += "Parsed Release file fields: Suite=\(suite ?? "nil"), Codename=\(codename ?? "nil"), Components=\(components.isEmpty ? "main" : components.joined(separator: ", "))\n" }
+            await MainActor.run {
+                if !simpleLogMode {
+                    logOutput += "Parsed Release file fields: Suite=\(suite ?? "nil"), Codename=\(codename ?? "nil"), Components=\(components.isEmpty ? "main" : components.joined(separator: ", "))\n"
+                }
+            }
         }
 
         if let suite = suite, !suite.isEmpty {
@@ -698,7 +763,11 @@ struct ContentView: View {
         if metadataFileName != "Release" {
             // If no Release found, also try constructed subpaths if any (e.g. suite/codename paths)
             if !constructedSubpaths.isEmpty {
-                await MainActor.run { logOutput += "No Release file found at root; trying constructed subpaths for Packages files.\n" }
+                await MainActor.run {
+                    if !simpleLogMode {
+                        logOutput += "No Release file found at root; trying constructed subpaths for Packages files.\n"
+                    }
+                }
             }
         }
 
@@ -737,6 +806,9 @@ struct ContentView: View {
 
         guard let metadataURL = foundMetadataURL, let metadata = metadataData, let metadataName = metadataFileName else {
             await MainActor.run {
+                if !simpleLogMode {
+                    logOutput += "Failed to locate repo metadata files (Release, Packages, Packages.bz2, or Packages.gz).\n"
+                }
                 errorOutput = "Failed to locate repo metadata files (Release, Packages, Packages.bz2, or Packages.gz)."
                 downloadSummary = nil
                 isRunning = false
@@ -752,15 +824,26 @@ struct ContentView: View {
 
         // MARK: - Set progressPhase when parsing Packages file
         if metadataName == "Packages" {
-            await MainActor.run { logOutput += "Parsing Packages file...\n"
+            await MainActor.run {
+                if !simpleLogMode {
+                    logOutput += "Parsing Packages file...\n"
+                }
                 progressPhase = "Parsing Packages file..."
             }
         } else if metadataName == "Packages.gz" {
-            await MainActor.run { logOutput += "Parsing Packages.gz file...\n"
+            await MainActor.run {
+                if !simpleLogMode {
+                    logOutput += "Parsing Packages.gz file...\n"
+                    logOutput += "Packages.gz size: \(metadata.count) bytes\n"
+                }
                 progressPhase = "Parsing Packages.gz file..."
             }
         } else if metadataName == "Packages.bz2" {
-            await MainActor.run { logOutput += "Parsing Packages.bz2 file...\n"
+            await MainActor.run {
+                if !simpleLogMode {
+                    logOutput += "Parsing Packages.bz2 file...\n"
+                    logOutput += "Packages.bz2 size: \(metadata.count) bytes\n"
+                }
                 progressPhase = "Parsing Packages.bz2 file..."
             }
         }
@@ -771,6 +854,9 @@ struct ContentView: View {
             debRelativePaths = await parsePackagesFile(metadata)
             if debRelativePaths.isEmpty {
                 await MainActor.run {
+                    if !simpleLogMode {
+                        logOutput += "No .deb file URLs found in Packages file.\n"
+                    }
                     errorOutput = "No .deb file URLs found in Packages file."
                     downloadSummary = nil
                     isRunning = false
@@ -786,9 +872,17 @@ struct ContentView: View {
         } else if metadataName == "Packages.gz" {
             do {
                 let packagesData = try decompressGzip(data: metadata)
+                await MainActor.run {
+                    if !simpleLogMode {
+                        logOutput += "Successfully decompressed Packages.gz, size after decompression: \(packagesData.count) bytes\n"
+                    }
+                }
                 debRelativePaths = await parsePackagesFile(packagesData)
                 if debRelativePaths.isEmpty {
                     await MainActor.run {
+                        if !simpleLogMode {
+                            logOutput += "No .deb file URLs found in Packages.gz file after decompression.\n"
+                        }
                         errorOutput = "No .deb file URLs found in Packages.gz file."
                         downloadSummary = nil
                         isRunning = false
@@ -803,6 +897,9 @@ struct ContentView: View {
                 }
             } catch {
                 await MainActor.run {
+                    if !simpleLogMode {
+                        logOutput += "Failed to decompress Packages.gz: \(error.localizedDescription)\n"
+                    }
                     errorOutput = "Failed to parse Packages.gz file: \(error.localizedDescription)"
                     downloadSummary = nil
                     isRunning = false
@@ -818,17 +915,36 @@ struct ContentView: View {
         } else if metadataName == "Packages.bz2" {
             do {
                 let packagesData = try decompressBz2(data: metadata)
-                await MainActor.run { logOutput += "Packages.bz2 dekomprimiert, size: \(packagesData.count) Bytes\n" }
+                await MainActor.run { 
+                    if !simpleLogMode {
+                        logOutput += "Packages.bz2 decompressed, size: \(packagesData.count) Bytes\n"
+                    }
+                }
                 if let content = String(data: packagesData, encoding: .utf8) {
-                    await MainActor.run { logOutput += "--- Packages.bz2 Preview (UTF-8, first 1000 chars):\n\(content.prefix(1000))\n------------------------------\n" }
+                    await MainActor.run { 
+                        if !simpleLogMode {
+                            logOutput += "--- Packages.bz2 Preview (UTF-8, first 1000 chars):\n\(content.prefix(1000))\n------------------------------\n"
+                        }
+                    }
                 } else if let content = String(data: packagesData, encoding: .isoLatin1) {
-                    await MainActor.run { logOutput += "--- Packages.bz2 Preview (Latin1, first 1000 chars):\n\(content.prefix(1000))\n------------------------------\n" }
+                    await MainActor.run { 
+                        if !simpleLogMode {
+                            logOutput += "--- Packages.bz2 Preview (Latin1, first 1000 chars):\n\(content.prefix(1000))\n------------------------------\n"
+                        }
+                    }
                 } else {
-                    await MainActor.run { logOutput += "Konnte Packages.bz2 nicht als UTF-8 oder Latin1 dekodieren.\n" }
+                    await MainActor.run { 
+                        if !simpleLogMode {
+                            logOutput += "Could not decode Packages.bz2 as UTF-8 or Latin1.\n"
+                        }
+                    }
                 }
                 debRelativePaths = await parsePackagesFile(packagesData)
                 if debRelativePaths.isEmpty {
                     await MainActor.run {
+                        if !simpleLogMode {
+                            logOutput += "No .deb file URLs found in Packages.bz2 file after decompression.\n"
+                        }
                         errorOutput = "No .deb file URLs found in Packages.bz2 file."
                         downloadSummary = nil
                         isRunning = false
@@ -843,6 +959,9 @@ struct ContentView: View {
                 }
             } catch {
                 await MainActor.run {
+                    if !simpleLogMode {
+                        logOutput += "BZ2 decompression failed or not supported: \(error.localizedDescription)\n"
+                    }
                     errorOutput = "BZ2 decompression not supported yet. Cannot parse Packages.bz2."
                     downloadSummary = nil
                     isRunning = false
@@ -857,12 +976,20 @@ struct ContentView: View {
             }
         } else if metadataName == "Release" {
             // Release file found, but no Packages file; fallback to recursive mirror
-            await recursiveMirrorRepo(from: repoBaseURL, to: repoPath)
+            await MainActor.run {
+                if !simpleLogMode {
+                    logOutput += "Release file found, but no Packages file; starting recursive mirror...\n"
+                }
+            }
+            await recursiveMirrorRepo(from: repoBaseURL, to: repoPath, isTopLevel: true)
             return
         }
 
         // MARK: - Set progressPhase when preparing download list
         await MainActor.run {
+            if !simpleLogMode {
+                logOutput += "Preparing download list with \(debRelativePaths.count) entries from \(metadataName)...\n"
+            }
             progressPhase = "Preparing download list..."
         }
 
@@ -895,7 +1022,9 @@ struct ContentView: View {
 
         // MARK: - Setup progress tracking before download loop and update phase
         await MainActor.run {
-            logOutput += "Starting download of \(debURLs.count) .deb files...\n"
+            if !simpleLogMode {
+                logOutput += "Starting download of \(debURLs.count) .deb files...\n"
+            }
             filesTotal = debURLs.count
             filesDownloaded = 0
             progress = 0
@@ -931,6 +1060,11 @@ struct ContentView: View {
             let localDir = localFileURL.deletingLastPathComponent()
             do {
                 try fileManager.createDirectory(at: localDir, withIntermediateDirectories: true, attributes: nil)
+                await MainActor.run {
+                    if !simpleLogMode {
+                        logOutput += "Ensured directory exists: \(localDir.path)\n"
+                    }
+                }
             } catch {
                 await MainActor.run {
                     if !simpleLogMode {
@@ -947,7 +1081,7 @@ struct ContentView: View {
                     if let fileSize = attrs[.size] as? UInt64, fileSize > 0 {
                         await MainActor.run {
                             if !simpleLogMode {
-                                logOutput += "[\(index+1)/\(debURLs.count)] Skipping existing file: \(localRelativePath)\n"
+                                logOutput += "[\(index+1)/\(debURLs.count)] Skipping existing file: \(localRelativePath), size: \(fileSize) bytes\n"
                             }
                             filesDownloaded += 1
                             progress = Double(filesDownloaded) / Double(filesTotal)
@@ -970,7 +1104,7 @@ struct ContentView: View {
                 try fileData.write(to: localFileURL)
                 await MainActor.run {
                     if !simpleLogMode {
-                        logOutput += "Saved to \(localFileURL.path)\n"
+                        logOutput += "Saved to \(localFileURL.path), size: \(fileData.count) bytes\n"
                     }
                     // MARK: - Update progress after successful file download
                     filesDownloaded += 1
@@ -994,11 +1128,18 @@ struct ContentView: View {
 
         // Additional step: Mirror anything else in the repo
         // Recursively mirror all remaining files (icons, banners, html, etc.) for full repo hosting
-        await recursiveMirrorRepo(from: baseURL, to: repoPath) 
+        await MainActor.run {
+            if !simpleLogMode {
+                logOutput += "Starting recursive mirror of remaining repo files...\n"
+            }
+        }
+        await recursiveMirrorRepo(from: baseURL, to: repoPath, isTopLevel: true)
 
         await MainActor.run {
             if Task.isCancelled {
-                logOutput += "\nDownload cancelled.\n"
+                if !simpleLogMode {
+                    logOutput += "\nDownload cancelled by user.\n"
+                }
                 downloadSummary = nil
                 // MARK: - Set progressPhase on cancel
                 progressPhase = "Download cancelled"
@@ -1018,6 +1159,9 @@ struct ContentView: View {
                     let moreText = downloadIssues.count > maxDisplay ? "\n..." : ""
                     let baseSummary = "Failed to download \(downloadIssues.count) file(s):\n\(displayList)\(moreText)"
                     downloadSummary = baseSummary
+                    if !simpleLogMode {
+                        logOutput += "Failed to download \(downloadIssues.count) files.\n"
+                    }
                 }
                 // *** Updated to set lastDownloadFolderURL and showOpenFolderButton ***
                 if fileManager.fileExists(atPath: repoPath.path) {
@@ -1030,6 +1174,18 @@ struct ContentView: View {
                 // MARK: - Set progressPhase on completion
                 progressPhase = "Download complete"
             }
+            // Append summary line to logOutput before writing log file
+            if Task.isCancelled {
+                logOutput += "Summary: Operation cancelled by user.\n"
+            } else if downloadIssues.isEmpty && errorOutput.isEmpty {
+                logOutput += "Summary: Download complete. No errors encountered.\n"
+            } else if !downloadIssues.isEmpty {
+                logOutput += "Summary: Download finished with \(downloadIssues.count) errors. See above for details.\n"
+            } else if !errorOutput.isEmpty {
+                logOutput += "Summary: Completed with error: \(errorOutput)\n"
+            }
+            // Write log file at end
+            writeLogFile(to: repoPath, log: logOutput)
             isRunning = false
             downloadTask = nil
             isPaused = false
@@ -1113,14 +1269,29 @@ struct ContentView: View {
         return try BZip2.decompress(data: data)
     }
     
+    // MARK: - Helper to write the log file
+    private func writeLogFile(to folder: URL, log: String) {
+        let logFileURL = folder.appendingPathComponent("download.log")
+        do {
+            try log.write(to: logFileURL, atomically: true, encoding: .utf8)
+        } catch {
+            DispatchQueue.main.async {
+                logOutput += "Failed to write log file: \(error.localizedDescription)\n"
+            }
+        }
+    }
+    
     func openRepoFolder() {
         guard let url = repoFolderURL else { return }
         NSWorkspace.shared.open(url)
     }
     
     /// Recursively download all reachable files from a given base URL to the given destination directory (mimics wget -r)
-    func recursiveMirrorRepo(from baseURL: URL, to localDir: URL) async {
-        await MainActor.run { logOutput += "Recursively mirroring: \(baseURL.absoluteString)\n"
+    func recursiveMirrorRepo(from baseURL: URL, to localDir: URL, isTopLevel: Bool = true) async {
+        await MainActor.run { 
+            if !simpleLogMode {
+                logOutput += "Recursively mirroring: \(baseURL.absoluteString)\n"
+            }
             progressPhase = "Downloading Metadata..."
         }
         let session = URLSession.shared
@@ -1160,38 +1331,83 @@ struct ContentView: View {
                 let localFileURL = localDir.appendingPathComponent(relativePath)
                 let isDirectory = link.hasSuffix("/")
                 if isDirectory {
-                    do { try fileManager.createDirectory(at: localFileURL, withIntermediateDirectories: true, attributes: nil) } catch {}
-                    await recursiveMirrorRepo(from: subURL, to: localFileURL)
+                    do { 
+                        try fileManager.createDirectory(at: localFileURL, withIntermediateDirectories: true, attributes: nil) 
+                        await MainActor.run {
+                            if !simpleLogMode {
+                                logOutput += "Created directory for recursive mirror: \(localFileURL.path)\n"
+                            }
+                        }
+                    } catch {
+                        await MainActor.run {
+                            if !simpleLogMode {
+                                logOutput += "Failed to create directory during recursive mirror: \(localFileURL.path): \(error.localizedDescription)\n"
+                            }
+                        }
+                    }
+                    await recursiveMirrorRepo(from: subURL, to: localFileURL, isTopLevel: false)
                 } else {
-                    await MainActor.run { logOutput += "Recursively downloading: \(subURL.absoluteString)\n" }
+                    await MainActor.run { 
+                        if !simpleLogMode {
+                            logOutput += "Recursively downloading: \(subURL.absoluteString)\n"
+                        }
+                    }
                     do {
                         // Do not overwrite files already downloaded by the main pass
                         if !fileManager.fileExists(atPath: localFileURL.path) {
                             let fileData = try await fetchURL(subURL)
                             try fileData.write(to: localFileURL)
-                            await MainActor.run { logOutput += "Saved recursively to \(localFileURL.path)\n" }
+                            await MainActor.run {
+                                if !simpleLogMode {
+                                    logOutput += "Saved recursively to \(localFileURL.path)\n"
+                                }
+                            }
                         }
                     } catch {
-                        await MainActor.run { logOutput += "Failed to download (recursive) \(subURL.absoluteString): \(error.localizedDescription)\n" }
+                        await MainActor.run { 
+                            if !simpleLogMode {
+                                logOutput += "Failed to download (recursive) \(subURL.absoluteString): \(error.localizedDescription)\n"
+                            }
+                        }
                     }
                 }
             }
         } catch {
             // Not a directory or not listing, nothing to do
+            await MainActor.run {
+                if !simpleLogMode {
+                    logOutput += "Directory fetch failed or not a directory: \(baseURL.absoluteString)\n"
+                    logOutput += "Error: \(error.localizedDescription)\n"
+                }
+            }
         }
         await MainActor.run {
             if Task.isCancelled {
-                logOutput += "\nDownload cancelled.\n"
+                if !simpleLogMode {
+                    logOutput += "\nRecursive mirror cancelled.\n"
+                }
                 progressPhase = "Download cancelled"
             } else {
                 progressPhase = "Download complete"
                 downloadSummary = "Recursive mirror complete."
             }
-            isRunning = false
-            downloadTask = nil
-            isPaused = false
-            showOpenFolderButton = (repoFolderURL != nil && fileManager.fileExists(atPath: repoFolderURL!.path))
-            mirrorTask = nil
+            if isTopLevel {
+                // Append summary line to logOutput before writing log file
+                if Task.isCancelled {
+                    logOutput += "Summary: Operation cancelled by user.\n"
+                } else if errorOutput.isEmpty {
+                    logOutput += "Summary: Recursive mirror completed successfully.\n"
+                } else {
+                    logOutput += "Summary: Recursive mirror completed with errors: \(errorOutput)\n"
+                }
+                isRunning = false
+                downloadTask = nil
+                isPaused = false
+                showOpenFolderButton = (repoFolderURL != nil && fileManager.fileExists(atPath: repoFolderURL!.path))
+                // Write log file at end
+                writeLogFile(to: localDir, log: logOutput)
+                mirrorTask = nil
+            }
         }
     }
 }
