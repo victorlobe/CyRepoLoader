@@ -1,6 +1,23 @@
-# CyRepoLoader (macOS)
+<p align="center">
+  <img width="120" height="120" alt="AppIcon" src="https://github.com/user-attachments/assets/6f25362e-c2cc-4274-9757-663923121dc3" />
+</p>
 
-A native macOS utility to download and mirror Cydia repositories using modern SwiftUI and pure Swift networking.
+<h1 align="center">CyRepoLoader</h1>
+
+<p align="center">
+  A native macOS utility to download and mirror Cydia repositories using modern SwiftUI and pure Swift networking.
+</p>
+
+<p align="center">
+  <a href="https://github.com/victorlobe/CyRepoLoader/releases/latest">
+    <img alt="Download" src="https://img.shields.io/badge/download-latest-blue?logo=apple" />
+  </a>
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-green">
+  <img alt="Platform" src="https://img.shields.io/badge/platform-macOS-007AFF">
+</p>
+
+---
+
 
 ## ✨ Features
 
