@@ -1154,10 +1154,8 @@ struct ContentView: View {
                     // Removed assignment of downloadSummary = "Success"
                     // downloadSummary = "Success"
                 } else {
-                    let maxDisplay = 10
-                    let displayList = downloadIssues.prefix(maxDisplay).joined(separator: "\n")
-                    let moreText = downloadIssues.count > maxDisplay ? "\n..." : ""
-                    let baseSummary = "Failed to download \(downloadIssues.count) file(s):\n\(displayList)\(moreText)"
+                    // Remove truncation logic and show all failed files in summary
+                    let baseSummary = "Failed to download \(downloadIssues.count) file(s):\n" + downloadIssues.joined(separator: "\n")
                     downloadSummary = baseSummary
                     if !simpleLogMode {
                         logOutput += "Failed to download \(downloadIssues.count) files.\n"
