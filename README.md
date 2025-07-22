@@ -1,14 +1,30 @@
-# CyRepoLoader (macOS)
+<p align="center">
+  <img width="120" height="120" alt="AppIcon" src="https://github.com/user-attachments/assets/6f25362e-c2cc-4274-9757-663923121dc3" />
+</p>
 
-A native macOS utility to download and mirror Cydia repositories using modern SwiftUI and pure Swift networking.
+<h1 align="center">CyRepoLoader</h1>
+
+<p align="center">
+  A native macOS utility to download and mirror Cydia repositories using modern SwiftUI and pure Swift networking.
+</p>
+
+<p align="center">
+  <a href="https://github.com/victorlobe/CyRepoLoader/releases/latest">
+    <img alt="Download" src="https://img.shields.io/badge/download-latest-blue?logo=apple" />
+  </a>
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-green">
+  <img alt="Platform" src="https://img.shields.io/badge/platform-macOS-007AFF">
+</p>
+
+---
+
 
 ## ✨ Features
 
-- 🔗 Enter or paste any Cydia repo URL
-- 📁 Choose your download destination folder (with drag-and-drop support)  
-- 📜 View real time download progress and logs  
-- 🛑 Cancel downloads anytime  
+- 🔗 Make an archive of every Cydia (or Installer) repo.
+- 📜 View real time download progress and logs
 - 🧠 Automatically remembers recent repo URLs  
+- 🛑 Cancel downloads anytime  
 - 📥 Full repo mirror: All .deb files and metadata of the repo are saved.
 - 🧠 Error detection and summary display for failed downloads  
 - 🌗 Fully native, SwiftUI based, fast and lightweight  
@@ -58,3 +74,5 @@ Made with ❤️ by Victor Lobe
 MIT License – Free to use, share, and modify.
 
 ---
+
+Yes, ChatGPT helped me with this Readme.
