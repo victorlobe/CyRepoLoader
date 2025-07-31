@@ -45,6 +45,9 @@ struct ContentView: View {
     // *** New state variable for last download folder URL ***
     @State private var lastDownloadFolderURL: URL? = nil
 
+    // New state variable for Victor photo sheet presentation
+    @State private var showVictorPhotoSheet = false
+
     // Deduplication set for recursive mirror URLs
     private var alreadyMirroredURLs = Set<String>()
     
@@ -70,9 +73,14 @@ struct ContentView: View {
                     Text("CyRepoLoader")
                         .font(.title2)
                         .bold()
-                    Text("by Victor")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    Button {
+                        showVictorPhotoSheet = true
+                    } label: {
+                        Text("by Victor")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
                 }
                 HStack {
                     Picker("", selection: $selectedScheme) {
@@ -393,6 +401,9 @@ struct ContentView: View {
                 if let savedScheme = UserDefaults.standard.string(forKey: selectedSchemeKey), !savedScheme.isEmpty {
                     selectedScheme = savedScheme
                 }
+            }
+            .sheet(isPresented: $showVictorPhotoSheet) {
+                VictorPhotoSheet()
             }
             HStack {
                 Spacer()
@@ -1417,7 +1428,32 @@ struct LogScrollBottomKey: PreferenceKey {
     }
 }
 
+struct VictorPhotoSheet: View {
+    // The image asset should be named "victor_photo" in the Asset Catalog.
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Image("victor")
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: 300, maxHeight: 300)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .shadow(radius: 8)
+            Text("Hey, i´m Victor 🤠")
+                .font(.headline)
+                .foregroundColor(.primary)
+            Button("Hey Victor") {
+                dismiss()
+            }
+            .keyboardShortcut(.cancelAction)
+            .buttonStyle(.borderedProminent)
+        }
+        .padding()
+        .frame(minWidth: 350, minHeight: 400)
+    }
+}
+
 #Preview {
     ContentView()
 }
-
