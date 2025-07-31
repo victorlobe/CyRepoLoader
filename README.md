@@ -64,6 +64,7 @@
 ## 🗒️ To Do
 
 - [ ] Compare Repos with local files
+- [ ] Add a remote function for headless servers
 
 ## 🐞 Known Bugs
 
