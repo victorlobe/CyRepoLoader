@@ -61,6 +61,16 @@
 - Temporary logs and progress are displayed live within the app interface.
 - To compile this project on older Xcode Versions than Xcode 26 you maybe have to remove the AppIcon.icon file in the CyRepoLoader Folder.
 
+## 🗒️ To Do
+
+- [ ] Compare Repos with local files
+
+## 🐞 Known Bugs
+
+- App may freeze briefly when parsing very large repos
+- Occasional UI lag when displaying large log outputs
+- When scrolling down the Log while the tool is running, the log scrolls down by itself.
+
 ## 🧠 Behind the Scenes
 
 All mirroring is done natively using Swift and URLSession with custom logic to parse repo metadata and download repository files efficiently.
