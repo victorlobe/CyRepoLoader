@@ -17,6 +17,7 @@ struct ContentView: View {
     @State private var repoHistory: [String] = []
     @State private var isRunning: Bool = false
     @State private var logOutput: String = ""
+    @State private var fullLogOutput: String = "" // Holds the complete log content
     @State private var errorOutput: String = ""
     @State private var showingPicker = false
     @State private var shouldAutoScroll: Bool = true
@@ -51,6 +52,9 @@ struct ContentView: View {
     // Deduplication set for recursive mirror URLs
     private var alreadyMirroredURLs = Set<String>()
     
+    // *** Added new state to track forbidden (paid/unauthorized) deb URLs ***
+    @State private var forbiddenDebs: [String] = [] // Tracks forbidden (paid) deb URLs
+    
     private var versionString: String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
@@ -60,10 +64,19 @@ struct ContentView: View {
     private var repoFolderURL: URL? {
         let trimmedRepoURL = repoURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedRepoURL.isEmpty else { return nil }
-        let url = URL(string: trimmedRepoURL)
+        let url = URL(string: trimmedRepoURL.hasPrefix("http") ? trimmedRepoURL : (selectedScheme.isEmpty ? "" : selectedScheme + "://") + trimmedRepoURL)
         let expandedDestDir = (destDir as NSString).expandingTildeInPath
-        let urlHost = url?.host ?? "repo"
-        return URL(fileURLWithPath: expandedDestDir).appendingPathComponent(urlHost, isDirectory: true)
+        guard let url else { return nil }
+        // Build a unique folder name for host + subpath (e.g., cydia.invoxiplaygames.uk_beta)
+        let host = url.host ?? "repo"
+        var pathComponent = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if !pathComponent.isEmpty {
+            // Replace / with _ to avoid subfoldering and illegal characters
+            pathComponent = pathComponent.replacingOccurrences(of: "/", with: "_")
+            return URL(fileURLWithPath: expandedDestDir).appendingPathComponent("\(host)_\(pathComponent)", isDirectory: true)
+        } else {
+            return URL(fileURLWithPath: expandedDestDir).appendingPathComponent(host, isDirectory: true)
+        }
     }
 
     var body: some View {
@@ -108,6 +121,8 @@ struct ContentView: View {
                                 errorOutput = ""
                                 downloadSummary = nil
                                 logOutput = ""
+                                fullLogOutput = ""
+                                forbiddenDebs = [] // Reset forbidden debs at start
                                 mirrorTask = Task { await mirrorRepo() }
                             }
                         }
@@ -194,6 +209,8 @@ struct ContentView: View {
                         errorOutput = "" // Reset errors when starting a new download
                         downloadSummary = nil
                         logOutput = ""   // Clear log only when starting a new download
+                        fullLogOutput = "" // Clear the full log as well
+                        forbiddenDebs = [] // Reset forbidden debs at start
                         mirrorTask = Task { await mirrorRepo() }
                     }
                     .disabled(isRunning || repoURL.isEmpty || destDir.isEmpty)
@@ -234,12 +251,6 @@ struct ContentView: View {
                                 .font(.footnote)
                                 .foregroundColor(.secondary)
                                 .padding(.top, 2)
-                        }
-                        if let summary = downloadSummary, summary.localizedCaseInsensitiveContains("error") || summary.localizedCaseInsensitiveContains("failed") {
-                            Text(summary)
-                                .padding(.top, 6)
-                                .foregroundColor(summary.localizedCaseInsensitiveContains("error") || summary.localizedCaseInsensitiveContains("failed") ? .red : .green)
-                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                     .padding(.vertical, 8)
@@ -326,26 +337,6 @@ struct ContentView: View {
                         .padding(.top, 5)
                 }
                 
-                if !isRunning, showOpenFolderButton, let repoFolderURL = repoFolderURL, FileManager.default.fileExists(atPath: repoFolderURL.path) {
-                    Text("Download finished. You can open the download folder below.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 8)
-                    
-                    if let summary = downloadSummary, summary.localizedCaseInsensitiveContains("error") || summary.localizedCaseInsensitiveContains("failed") {
-                        Text(summary)
-                            .padding(.vertical, 6)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .foregroundColor(summary.localizedCaseInsensitiveContains("error") || summary.localizedCaseInsensitiveContains("failed") ? .red : .green)
-                    }
-                    
-                    Button("Open Folder") {
-                        openRepoFolder()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .padding(.top, 4)
-                }
-                
                 Spacer()
                 
                 if !repoHistory.isEmpty {
@@ -400,6 +391,23 @@ struct ContentView: View {
                 repoHistory = defaults.stringArray(forKey: "repoHistory") ?? []
                 if let savedScheme = UserDefaults.standard.string(forKey: selectedSchemeKey), !savedScheme.isEmpty {
                     selectedScheme = savedScheme
+                }
+                // Initialize logOutput based on current simpleLogMode and fullLogOutput
+                if simpleLogMode {
+                    // In simple mode, logOutput is empty or summary only
+                    logOutput = ""
+                } else {
+                    logOutput = fullLogOutput
+                }
+            }
+            .onChange(of: simpleLogMode) { newValue in
+                // When toggling simpleLogMode, update logOutput accordingly
+                if newValue {
+                    // simpleLogMode is true: show minimal or empty log output
+                    logOutput = ""
+                } else {
+                    // simpleLogMode is false: show full log output
+                    logOutput = fullLogOutput
                 }
             }
             .sheet(isPresented: $showVictorPhotoSheet) {
@@ -471,19 +479,20 @@ struct ContentView: View {
         await MainActor.run {
             errorOutput = ""
             downloadSummary = nil
+            forbiddenDebs = [] // Reset forbidden debs at start
         }
         
         // Log start of session with selected repo and destination
         await MainActor.run {
-            if !simpleLogMode {
-                logOutput += "Starting download session.\n"
-                logOutput += "Repo URL (selected scheme + repoURL): \(selectedScheme.isEmpty ? "" : selectedScheme + "://")\(repoURL.trimmingCharacters(in: .whitespacesAndNewlines))\n"
-                logOutput += "Download destination directory: \(destDir)\n"
-            }
+            fullLogOutput += "Starting download session.\n"
+            fullLogOutput += "Repo URL (selected scheme + repoURL): \(selectedScheme.isEmpty ? "" : selectedScheme + "://")\(repoURL.trimmingCharacters(in: .whitespacesAndNewlines))\n"
+            fullLogOutput += "Download destination directory: \(destDir)\n"
+            if !simpleLogMode { logOutput = fullLogOutput }
         }
 
         await MainActor.run {
             isRunning = true
+            fullLogOutput = ""
             logOutput = ""
             shouldAutoScroll = true
             showOpenFolderButton = false
@@ -502,15 +511,13 @@ struct ContentView: View {
         // Validate finalURLString
         let trimmedFinalURL = finalURLString.trimmingCharacters(in: .whitespacesAndNewlines)
         await MainActor.run {
-            if !simpleLogMode {
-                logOutput += "Validating URL: \(trimmedFinalURL)\n"
-            }
+            fullLogOutput += "Validating URL: \(trimmedFinalURL)\n"
+            if !simpleLogMode { logOutput = fullLogOutput }
         }
         guard let baseURL = URL(string: trimmedFinalURL) else {
             await MainActor.run {
-                if !simpleLogMode {
-                    logOutput += "Invalid URL format.\n"
-                }
+                fullLogOutput += "Invalid URL format.\n"
+                if !simpleLogMode { logOutput = fullLogOutput }
                 errorOutput = "Invalid URL: Please enter a valid URL starting with http:// or https://"
                 downloadSummary = nil
                 isRunning = false
@@ -525,9 +532,8 @@ struct ContentView: View {
         }
         guard let scheme = baseURL.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
             await MainActor.run {
-                if !simpleLogMode {
-                    logOutput += "Invalid URL scheme: \(baseURL.scheme ?? "none")\n"
-                }
+                fullLogOutput += "Invalid URL scheme: \(baseURL.scheme ?? "none")\n"
+                if !simpleLogMode { logOutput = fullLogOutput }
                 errorOutput = "Invalid URL scheme: Use http:// or https://"
                 downloadSummary = nil
                 isRunning = false
@@ -541,24 +547,21 @@ struct ContentView: View {
             return
         }
         await MainActor.run {
-            if !simpleLogMode {
-                logOutput += "URL scheme is valid: \(scheme)\n"
-            }
+            fullLogOutput += "URL scheme is valid: \(scheme)\n"
+            if !simpleLogMode { logOutput = fullLogOutput }
         }
 
         // Validate destDir
         let expandedDestDir = (destDir as NSString).expandingTildeInPath
         await MainActor.run {
-            if !simpleLogMode {
-                logOutput += "Validating destination directory: \(expandedDestDir)\n"
-            }
+            fullLogOutput += "Validating destination directory: \(expandedDestDir)\n"
+            if !simpleLogMode { logOutput = fullLogOutput }
         }
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: expandedDestDir, isDirectory: &isDir), isDir.boolValue else {
             await MainActor.run {
-                if !simpleLogMode {
-                    logOutput += "Invalid destination directory: does not exist or not a directory.\n"
-                }
+                fullLogOutput += "Invalid destination directory: does not exist or not a directory.\n"
+                if !simpleLogMode { logOutput = fullLogOutput }
                 errorOutput = "Invalid destination: The download destination must be an existing folder."
                 downloadSummary = nil
                 isRunning = false
@@ -572,27 +575,31 @@ struct ContentView: View {
             return
         }
         await MainActor.run {
-            if !simpleLogMode {
-                logOutput += "Destination directory is valid.\n"
-            }
+            fullLogOutput += "Destination directory is valid.\n"
+            if !simpleLogMode { logOutput = fullLogOutput }
         }
 
-        // Create repo folder path
-        let urlHost = baseURL.host ?? "repo"
-        let repoPath = URL(fileURLWithPath: expandedDestDir).appendingPathComponent(urlHost, isDirectory: true)
+        // Create repo folder path with host + subpath logic
+        let host = baseURL.host ?? "repo"
+        var pathComponent = baseURL.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let repoPath: URL
+        if !pathComponent.isEmpty {
+            pathComponent = pathComponent.replacingOccurrences(of: "/", with: "_")
+            repoPath = URL(fileURLWithPath: expandedDestDir).appendingPathComponent("\(host)_\(pathComponent)", isDirectory: true)
+        } else {
+            repoPath = URL(fileURLWithPath: expandedDestDir).appendingPathComponent(host, isDirectory: true)
+        }
 
         do {
             try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true, attributes: nil)
             await MainActor.run {
-                if !simpleLogMode {
-                    logOutput += "Created repo directory at \(repoPath.path)\n"
-                }
+                fullLogOutput += "Created repo directory at \(repoPath.path)\n"
+                if !simpleLogMode { logOutput = fullLogOutput }
             }
         } catch {
             await MainActor.run {
-                if !simpleLogMode {
-                    logOutput += "Failed to create repo directory: \(error.localizedDescription)\n"
-                }
+                fullLogOutput += "Failed to create repo directory: \(error.localizedDescription)\n"
+                if !simpleLogMode { logOutput = fullLogOutput }
                 errorOutput = "Failed to create destination directory: \(error.localizedDescription)"
                 downloadSummary = nil
                 isRunning = false
@@ -608,9 +615,8 @@ struct ContentView: View {
 
         // MARK: - Set progressPhase when searching metadata files
         await MainActor.run {
-            if !simpleLogMode {
-                logOutput += "Checking repo metadata files...\n"
-            }
+            fullLogOutput += "Checking repo metadata files...\n"
+            if !simpleLogMode { logOutput = fullLogOutput }
             progressPhase = "Searching repo metadata files..."
         }
 
@@ -624,9 +630,10 @@ struct ContentView: View {
             "Packages.gz"
         ]
         // Common hardcoded fallback sub-paths to try if root not found or suite/codename missing
+        // Removed leading slashes to be relative subpaths under user-supplied baseURL
         let fallbackSubpaths = [
-            "/./",
-            "/dists/stable/main/binary-iphoneos-arm/"
+            "./",
+            "dists/stable/main/binary-iphoneos-arm/"
         ]
 
         var repoBaseURL = baseURL
@@ -649,30 +656,27 @@ struct ContentView: View {
             }
             for url in candidateURLs {
                 do {
-                    await MainActor.run { 
-                        if !simpleLogMode {
-                            logOutput += "Trying \(url.absoluteString)...\n"
-                        }
+                    await MainActor.run {
+                        fullLogOutput += "Trying \(url.absoluteString)...\n"
+                        if !simpleLogMode { logOutput = fullLogOutput }
                     }
                     let data = try await fetchURL(url)
-                    await MainActor.run { 
-                        if !simpleLogMode {
-                            logOutput += "Found \(filename) at \(url.absoluteString)\n"
-                        }
+                    await MainActor.run {
+                        fullLogOutput += "Found \(filename) at \(url.absoluteString)\n"
+                        if !simpleLogMode { logOutput = fullLogOutput }
                     }
                     return data
                 } catch {
-                    await MainActor.run { 
-                        if !simpleLogMode {
-                            logOutput += "Not found or error fetching \(filename) at \(url.absoluteString): \(error.localizedDescription)\n"
-                        }
+                    await MainActor.run {
+                        fullLogOutput += "Not found or error fetching \(filename) at \(url.absoluteString): \(error.localizedDescription)\n"
+                        if !simpleLogMode { logOutput = fullLogOutput }
                     }
                 }
             }
             return nil
         }
 
-        // First, try root metadata files (Release, Packages, etc) as before
+        // Always search for metadata files at the user-supplied baseURL (including any subpath) first.
         outerLoop: for filename in metadataFiles {
             if let data = await tryMetadataFile(base: baseURL, filename: filename) {
                 foundMetadataURL = baseURL.appendingPathComponent(filename)
@@ -684,7 +688,7 @@ struct ContentView: View {
 
         // Always try the classic subpath for Cydia repos (BigBoss etc), even if no Release file exists
         if foundMetadataURL == nil {
-            let classicSubpath = "/dists/stable/main/binary-iphoneos-arm/"
+            let classicSubpath = "dists/stable/main/binary-iphoneos-arm/"
             if let classicURL = URL(string: classicSubpath, relativeTo: baseURL)?.absoluteURL {
                 for filename in ["Packages", "Packages.gz", "Packages.bz2"] {
                     if let data = await tryMetadataFile(base: classicURL, filename: filename) {
@@ -698,7 +702,7 @@ struct ContentView: View {
             }
         }
 
-        // Expliziter BigBoss-Debian-Standardpfad-Test: try /dists/stable/main/binary-iphoneos-arm/Packages.bz2 explicitly
+        // Expliziter BigBoss-Debian-Standardpfad-Test: try dists/stable/main/binary-iphoneos-arm/Packages.bz2 explicitly
         let debianPackagesBZ2 = "dists/stable/main/binary-iphoneos-arm/Packages.bz2"
         if foundMetadataURL == nil {
             if let debianURL = URL(string: debianPackagesBZ2, relativeTo: baseURL)?.absoluteURL {
@@ -746,16 +750,15 @@ struct ContentView: View {
         // Helper to append subpaths for a given release name (suite or codename)
         func addSubpaths(forRelease release: String) {
             for comp in components.isEmpty ? ["main"] : components {
-                let subpath = "/dists/\(release)/\(comp)/binary-iphoneos-arm/"
+                let subpath = "dists/\(release)/\(comp)/binary-iphoneos-arm/"
                 constructedSubpaths.append(subpath)
             }
         }
 
         if suite != nil || codename != nil {
             await MainActor.run {
-                if !simpleLogMode {
-                    logOutput += "Parsed Release file fields: Suite=\(suite ?? "nil"), Codename=\(codename ?? "nil"), Components=\(components.isEmpty ? "main" : components.joined(separator: ", "))\n"
-                }
+                fullLogOutput += "Parsed Release file fields: Suite=\(suite ?? "nil"), Codename=\(codename ?? "nil"), Components=\(components.isEmpty ? "main" : components.joined(separator: ", "))\n"
+                if !simpleLogMode { logOutput = fullLogOutput }
             }
         }
 
@@ -775,9 +778,8 @@ struct ContentView: View {
             // If no Release found, also try constructed subpaths if any (e.g. suite/codename paths)
             if !constructedSubpaths.isEmpty {
                 await MainActor.run {
-                    if !simpleLogMode {
-                        logOutput += "No Release file found at root; trying constructed subpaths for Packages files.\n"
-                    }
+                    fullLogOutput += "No Release file found at root; trying constructed subpaths for Packages files.\n"
+                    if !simpleLogMode { logOutput = fullLogOutput }
                 }
             }
         }
@@ -799,7 +801,7 @@ struct ContentView: View {
                 }
             }
             if !foundInSubpath, metadataFileName == "Release" {
-                // Try fallback hardcoded subpaths if constructed subpaths failed
+                // Fallbacks are always children of the user-supplied baseURL, never host root.
                 fallbackLoop: for fallbackSubpath in fallbackSubpaths {
                     guard let fallbackURL = URL(string: fallbackSubpath, relativeTo: baseURL)?.absoluteURL else { continue }
                     for filename in ["Packages", "Packages.gz", "Packages.bz2"] {
@@ -817,9 +819,8 @@ struct ContentView: View {
 
         guard let metadataURL = foundMetadataURL, let metadata = metadataData, let metadataName = metadataFileName else {
             await MainActor.run {
-                if !simpleLogMode {
-                    logOutput += "Failed to locate repo metadata files (Release, Packages, Packages.bz2, or Packages.gz).\n"
-                }
+                fullLogOutput += "Failed to locate repo metadata files (Release, Packages, Packages.bz2, or Packages.gz).\n"
+                if !simpleLogMode { logOutput = fullLogOutput }
                 errorOutput = "Failed to locate repo metadata files (Release, Packages, Packages.bz2, or Packages.gz)."
                 downloadSummary = nil
                 isRunning = false
@@ -836,25 +837,22 @@ struct ContentView: View {
         // MARK: - Set progressPhase when parsing Packages file
         if metadataName == "Packages" {
             await MainActor.run {
-                if !simpleLogMode {
-                    logOutput += "Parsing Packages file...\n"
-                }
+                fullLogOutput += "Parsing Packages file...\n"
+                if !simpleLogMode { logOutput = fullLogOutput }
                 progressPhase = "Parsing Packages file..."
             }
         } else if metadataName == "Packages.gz" {
             await MainActor.run {
-                if !simpleLogMode {
-                    logOutput += "Parsing Packages.gz file...\n"
-                    logOutput += "Packages.gz size: \(metadata.count) bytes\n"
-                }
+                fullLogOutput += "Parsing Packages.gz file...\n"
+                fullLogOutput += "Packages.gz size: \(metadata.count) bytes\n"
+                if !simpleLogMode { logOutput = fullLogOutput }
                 progressPhase = "Parsing Packages.gz file..."
             }
         } else if metadataName == "Packages.bz2" {
             await MainActor.run {
-                if !simpleLogMode {
-                    logOutput += "Parsing Packages.bz2 file...\n"
-                    logOutput += "Packages.bz2 size: \(metadata.count) bytes\n"
-                }
+                fullLogOutput += "Parsing Packages.bz2 file...\n"
+                fullLogOutput += "Packages.bz2 size: \(metadata.count) bytes\n"
+                if !simpleLogMode { logOutput = fullLogOutput }
                 progressPhase = "Parsing Packages.bz2 file..."
             }
         }
@@ -865,9 +863,8 @@ struct ContentView: View {
             debRelativePaths = await parsePackagesFile(metadata)
             if debRelativePaths.isEmpty {
                 await MainActor.run {
-                    if !simpleLogMode {
-                        logOutput += "No .deb file URLs found in Packages file.\n"
-                    }
+                    fullLogOutput += "No .deb file URLs found in Packages file.\n"
+                    if !simpleLogMode { logOutput = fullLogOutput }
                     errorOutput = "No .deb file URLs found in Packages file."
                     downloadSummary = nil
                     isRunning = false
@@ -884,16 +881,14 @@ struct ContentView: View {
             do {
                 let packagesData = try decompressGzip(data: metadata)
                 await MainActor.run {
-                    if !simpleLogMode {
-                        logOutput += "Successfully decompressed Packages.gz, size after decompression: \(packagesData.count) bytes\n"
-                    }
+                    fullLogOutput += "Successfully decompressed Packages.gz, size after decompression: \(packagesData.count) bytes\n"
+                    if !simpleLogMode { logOutput = fullLogOutput }
                 }
                 debRelativePaths = await parsePackagesFile(packagesData)
                 if debRelativePaths.isEmpty {
                     await MainActor.run {
-                        if !simpleLogMode {
-                            logOutput += "No .deb file URLs found in Packages.gz file after decompression.\n"
-                        }
+                        fullLogOutput += "No .deb file URLs found in Packages.gz file after decompression.\n"
+                        if !simpleLogMode { logOutput = fullLogOutput }
                         errorOutput = "No .deb file URLs found in Packages.gz file."
                         downloadSummary = nil
                         isRunning = false
@@ -908,9 +903,8 @@ struct ContentView: View {
                 }
             } catch {
                 await MainActor.run {
-                    if !simpleLogMode {
-                        logOutput += "Failed to decompress Packages.gz: \(error.localizedDescription)\n"
-                    }
+                    fullLogOutput += "Failed to decompress Packages.gz: \(error.localizedDescription)\n"
+                    if !simpleLogMode { logOutput = fullLogOutput }
                     errorOutput = "Failed to parse Packages.gz file: \(error.localizedDescription)"
                     downloadSummary = nil
                     isRunning = false
@@ -926,36 +920,31 @@ struct ContentView: View {
         } else if metadataName == "Packages.bz2" {
             do {
                 let packagesData = try decompressBz2(data: metadata)
-                await MainActor.run { 
-                    if !simpleLogMode {
-                        logOutput += "Packages.bz2 decompressed, size: \(packagesData.count) Bytes\n"
-                    }
+                await MainActor.run {
+                    fullLogOutput += "Packages.bz2 decompressed, size: \(packagesData.count) Bytes\n"
+                    if !simpleLogMode { logOutput = fullLogOutput }
                 }
                 if let content = String(data: packagesData, encoding: .utf8) {
-                    await MainActor.run { 
-                        if !simpleLogMode {
-                            logOutput += "--- Packages.bz2 Preview (UTF-8, first 1000 chars):\n\(content.prefix(1000))\n------------------------------\n"
-                        }
+                    await MainActor.run {
+                        fullLogOutput += "--- Packages.bz2 Preview (UTF-8, first 1000 chars):\n\(content.prefix(1000))\n------------------------------\n"
+                        if !simpleLogMode { logOutput = fullLogOutput }
                     }
                 } else if let content = String(data: packagesData, encoding: .isoLatin1) {
-                    await MainActor.run { 
-                        if !simpleLogMode {
-                            logOutput += "--- Packages.bz2 Preview (Latin1, first 1000 chars):\n\(content.prefix(1000))\n------------------------------\n"
-                        }
+                    await MainActor.run {
+                        fullLogOutput += "--- Packages.bz2 Preview (Latin1, first 1000 chars):\n\(content.prefix(1000))\n------------------------------\n"
+                        if !simpleLogMode { logOutput = fullLogOutput }
                     }
                 } else {
-                    await MainActor.run { 
-                        if !simpleLogMode {
-                            logOutput += "Could not decode Packages.bz2 as UTF-8 or Latin1.\n"
-                        }
+                    await MainActor.run {
+                        fullLogOutput += "Could not decode Packages.bz2 as UTF-8 or Latin1.\n"
+                        if !simpleLogMode { logOutput = fullLogOutput }
                     }
                 }
                 debRelativePaths = await parsePackagesFile(packagesData)
                 if debRelativePaths.isEmpty {
                     await MainActor.run {
-                        if !simpleLogMode {
-                            logOutput += "No .deb file URLs found in Packages.bz2 file after decompression.\n"
-                        }
+                        fullLogOutput += "No .deb file URLs found in Packages.bz2 file after decompression.\n"
+                        if !simpleLogMode { logOutput = fullLogOutput }
                         errorOutput = "No .deb file URLs found in Packages.bz2 file."
                         downloadSummary = nil
                         isRunning = false
@@ -970,9 +959,8 @@ struct ContentView: View {
                 }
             } catch {
                 await MainActor.run {
-                    if !simpleLogMode {
-                        logOutput += "BZ2 decompression failed or not supported: \(error.localizedDescription)\n"
-                    }
+                    fullLogOutput += "BZ2 decompression failed or not supported: \(error.localizedDescription)\n"
+                    if !simpleLogMode { logOutput = fullLogOutput }
                     errorOutput = "BZ2 decompression not supported yet. Cannot parse Packages.bz2."
                     downloadSummary = nil
                     isRunning = false
@@ -988,9 +976,8 @@ struct ContentView: View {
         } else if metadataName == "Release" {
             // Release file found, but no Packages file; fallback to recursive mirror
             await MainActor.run {
-                if !simpleLogMode {
-                    logOutput += "Release file found, but no Packages file; starting recursive mirror...\n"
-                }
+                fullLogOutput += "Release file found, but no Packages file; starting recursive mirror...\n"
+                if !simpleLogMode { logOutput = fullLogOutput }
             }
             await recursiveMirrorRepo(from: repoBaseURL, to: repoPath, isTopLevel: true)
             return
@@ -998,9 +985,8 @@ struct ContentView: View {
 
         // MARK: - Set progressPhase when preparing download list
         await MainActor.run {
-            if !simpleLogMode {
-                logOutput += "Preparing download list with \(debRelativePaths.count) entries from \(metadataName)...\n"
-            }
+            fullLogOutput += "Preparing download list with \(debRelativePaths.count) entries from \(metadataName)...\n"
+            if !simpleLogMode { logOutput = fullLogOutput }
             progressPhase = "Preparing download list..."
         }
 
@@ -1033,9 +1019,8 @@ struct ContentView: View {
 
         // MARK: - Setup progress tracking before download loop and update phase
         await MainActor.run {
-            if !simpleLogMode {
-                logOutput += "Starting download of \(debURLs.count) .deb files...\n"
-            }
+            fullLogOutput += "Starting download of \(debURLs.count) .deb files...\n"
+            if !simpleLogMode { logOutput = fullLogOutput }
             filesTotal = debURLs.count
             filesDownloaded = 0
             progress = 0
@@ -1049,6 +1034,7 @@ struct ContentView: View {
         }
 
         var downloadIssues: [String] = []
+        forbiddenDebs = [] // Reset forbiddenDebs here again in case
 
         // Download .deb files in sequence to preserve order and progress display
         for (index, debURL) in debURLs.enumerated() {
@@ -1072,15 +1058,13 @@ struct ContentView: View {
             do {
                 try fileManager.createDirectory(at: localDir, withIntermediateDirectories: true, attributes: nil)
                 await MainActor.run {
-                    if !simpleLogMode {
-                        logOutput += "Ensured directory exists: \(localDir.path)\n"
-                    }
+                    fullLogOutput += "Ensured directory exists: \(localDir.path)\n"
+                    if !simpleLogMode { logOutput = fullLogOutput }
                 }
             } catch {
                 await MainActor.run {
-                    if !simpleLogMode {
-                        logOutput += "Failed to create directory \(localDir.path): \(error.localizedDescription)\n"
-                    }
+                    fullLogOutput += "Failed to create directory \(localDir.path): \(error.localizedDescription)\n"
+                    if !simpleLogMode { logOutput = fullLogOutput }
                 }
                 continue
             }
@@ -1091,9 +1075,8 @@ struct ContentView: View {
                     let attrs = try fileManager.attributesOfItem(atPath: localFileURL.path)
                     if let fileSize = attrs[.size] as? UInt64, fileSize > 0 {
                         await MainActor.run {
-                            if !simpleLogMode {
-                                logOutput += "[\(index+1)/\(debURLs.count)] Skipping existing file: \(localRelativePath), size: \(fileSize) bytes\n"
-                            }
+                            fullLogOutput += "[\(index+1)/\(debURLs.count)] Skipping existing file: \(localRelativePath), size: \(fileSize) bytes\n"
+                            if !simpleLogMode { logOutput = fullLogOutput }
                             filesDownloaded += 1
                             progress = Double(filesDownloaded) / Double(filesTotal)
                         }
@@ -1105,27 +1088,35 @@ struct ContentView: View {
             }
 
             await MainActor.run {
-                if !simpleLogMode {
-                    logOutput += "[\(index+1)/\(debURLs.count)] Downloading: \(localRelativePath)\n"
-                }
+                fullLogOutput += "[\(index+1)/\(debURLs.count)] Downloading: \(localRelativePath)\n"
+                if !simpleLogMode { logOutput = fullLogOutput }
             }
 
             do {
                 let fileData = try await fetchURL(debURL)
                 try fileData.write(to: localFileURL)
                 await MainActor.run {
-                    if !simpleLogMode {
-                        logOutput += "Saved to \(localFileURL.path), size: \(fileData.count) bytes\n"
-                    }
+                    fullLogOutput += "Saved to \(localFileURL.path), size: \(fileData.count) bytes\n"
+                    if !simpleLogMode { logOutput = fullLogOutput }
                     // MARK: - Update progress after successful file download
                     filesDownloaded += 1
                     progress = Double(filesDownloaded) / Double(filesTotal)
                 }
             } catch {
-                await MainActor.run {
-                    if !simpleLogMode {
-                        logOutput += "Failed to download \(debURL.absoluteString): \(error.localizedDescription)\n"
+                // MARK: - Inspect error to detect forbidden (paid/restricted) error (HTTP 403)
+                var isForbidden = false
+                if let urlError = error as? URLError {
+                    if urlError.code == .badServerResponse {
+                        // Check for NSURLErrorDomain error -1011 (HTTP 403) via underlying NSError code
+                        let nsError = error as NSError
+                        if nsError.domain == NSURLErrorDomain, nsError.code == -1011 {
+                            isForbidden = true
+                        }
                     }
+                }
+                await MainActor.run {
+                    fullLogOutput += "Failed to download \(debURL.absoluteString): \(error.localizedDescription)\n"
+                    if !simpleLogMode { logOutput = fullLogOutput }
                     if errorOutput.isEmpty {
                         errorOutput = "Errors occurred during download. See log for details."
                     }
@@ -1133,44 +1124,59 @@ struct ContentView: View {
                     filesDownloaded += 1
                     progress = Double(filesDownloaded) / Double(filesTotal)
                 }
-                downloadIssues.append("\(localRelativePath)")
+                if isForbidden {
+                    // Append to forbiddenDebs list
+                    await MainActor.run {
+                        forbiddenDebs.append(localRelativePath)
+                    }
+                } else {
+                    downloadIssues.append("\(localRelativePath)")
+                }
             }
         }
 
         // Additional step: Mirror anything else in the repo
         // Recursively mirror all remaining files (icons, banners, html, etc.) for full repo hosting
         await MainActor.run {
-            if !simpleLogMode {
-                logOutput += "Starting recursive mirror of remaining repo files...\n"
-            }
+            fullLogOutput += "Starting recursive mirror of remaining repo files...\n"
+            if !simpleLogMode { logOutput = fullLogOutput }
         }
         await recursiveMirrorRepo(from: baseURL, to: repoPath, isTopLevel: true)
 
         await MainActor.run {
             if Task.isCancelled {
-                if !simpleLogMode {
-                    logOutput += "\nDownload cancelled by user.\n"
-                }
+                fullLogOutput += "\nDownload cancelled by user.\n"
+                if !simpleLogMode { logOutput = fullLogOutput }
                 downloadSummary = nil
                 // MARK: - Set progressPhase on cancel
                 progressPhase = "Download cancelled"
             } else {
-                if !simpleLogMode {
-                    logOutput += "\nAll done. Your local mirror is at: \(repoPath.path)\n"
-                    logOutput += "Download complete.\n"
-                }
+                fullLogOutput += "\nAll done. Your local mirror is at: \(repoPath.path)\n"
+                fullLogOutput += "Download complete.\n"
+                if !simpleLogMode { logOutput = fullLogOutput }
                 // Clear previous errors on success
                 errorOutput = ""
-                if downloadIssues.isEmpty {
+                // MARK: - Compose download summary including forbidden debs
+                var summaryParts: [String] = []
+                if !forbiddenDebs.isEmpty {
+                    summaryParts.append("The following packages could not be downloaded because they are restricted (possibly paid or unauthorized):\n" + forbiddenDebs.joined(separator: "\n"))
+                    fullLogOutput += "Restricted files (forbidden/paid): \(forbiddenDebs.count) packages\n"
+                    for forbiddenFile in forbiddenDebs {
+                        fullLogOutput += " - \(forbiddenFile)\n"
+                    }
+                    if !simpleLogMode { logOutput = fullLogOutput }
+                }
+                if !downloadIssues.isEmpty {
+                    summaryParts.append("Failed to download \(downloadIssues.count) other file(s):\n" + downloadIssues.joined(separator: "\n"))
+                    fullLogOutput += "Failed to download \(downloadIssues.count) files.\n"
+                    if !simpleLogMode { logOutput = fullLogOutput }
+                }
+                if summaryParts.isEmpty {
+                    // No errors or forbidden files
                     // Removed assignment of downloadSummary = "Success"
                     // downloadSummary = "Success"
                 } else {
-                    // Remove truncation logic and show all failed files in summary
-                    let baseSummary = "Failed to download \(downloadIssues.count) file(s):\n" + downloadIssues.joined(separator: "\n")
-                    downloadSummary = baseSummary
-                    if !simpleLogMode {
-                        logOutput += "Failed to download \(downloadIssues.count) files.\n"
-                    }
+                    downloadSummary = summaryParts.joined(separator: "\n\n")
                 }
                 // *** Updated to set lastDownloadFolderURL and showOpenFolderButton ***
                 if fileManager.fileExists(atPath: repoPath.path) {
@@ -1182,19 +1188,33 @@ struct ContentView: View {
                 }
                 // MARK: - Set progressPhase on completion
                 progressPhase = "Download complete"
+
+                // If there were any errors and simple log mode is active, auto-switch to full log mode and display full log.
+                if (!forbiddenDebs.isEmpty || !downloadIssues.isEmpty) && simpleLogMode {
+                    simpleLogMode = false
+                    logOutput = fullLogOutput
+                }
             }
             // Append summary line to logOutput before writing log file
             if Task.isCancelled {
-                logOutput += "Summary: Operation cancelled by user.\n"
-            } else if downloadIssues.isEmpty && errorOutput.isEmpty {
-                logOutput += "Summary: Download complete. No errors encountered.\n"
-            } else if !downloadIssues.isEmpty {
-                logOutput += "Summary: Download finished with \(downloadIssues.count) errors. See above for details.\n"
-            } else if !errorOutput.isEmpty {
-                logOutput += "Summary: Completed with error: \(errorOutput)\n"
+                fullLogOutput += "Summary: Operation cancelled by user.\n"
+            } else if forbiddenDebs.isEmpty && downloadIssues.isEmpty && errorOutput.isEmpty {
+                fullLogOutput += "Summary: Download complete. No errors encountered.\n"
+            } else {
+                fullLogOutput += "Summary: Download finished with issues.\n"
+                if !forbiddenDebs.isEmpty {
+                    fullLogOutput += "Restricted (forbidden/paid) packages: \(forbiddenDebs.count)\n"
+                }
+                if !downloadIssues.isEmpty {
+                    fullLogOutput += "Failed to download \(downloadIssues.count) files.\n"
+                }
+                if !errorOutput.isEmpty {
+                    fullLogOutput += "Errors: \(errorOutput)\n"
+                }
             }
+            logOutput = simpleLogMode ? "" : fullLogOutput
             // Write log file at end
-            writeLogFile(to: repoPath, log: logOutput)
+            writeLogFile(to: repoPath, log: fullLogOutput)
             isRunning = false
             downloadTask = nil
             isPaused = false
@@ -1259,9 +1279,15 @@ struct ContentView: View {
         if !currentPackageDict.isEmpty, let debPath = foundDebRelativePath(from: currentPackageDict) {
             debRelativePaths.append(debPath)
         }
-        await MainActor.run { logOutput += "parsePackagesFile: Found \(debRelativePaths.count) .deb-Pfade\n" }
+        await MainActor.run {
+            fullLogOutput += "parsePackagesFile: Found \(debRelativePaths.count) .deb-Pfade\n"
+            if !simpleLogMode { logOutput = fullLogOutput }
+        }
         if debRelativePaths.isEmpty {
-            await MainActor.run { logOutput += "Erste 500 Zeichen der Packages-Datei zur Diagnose: \n" + (content.prefix(500)) + "\n" }
+            await MainActor.run {
+                fullLogOutput += "Erste 500 Zeichen der Packages-Datei zur Diagnose: \n" + (content.prefix(500)) + "\n"
+                if !simpleLogMode { logOutput = fullLogOutput }
+            }
         }
         return debRelativePaths
     }
@@ -1285,7 +1311,10 @@ struct ContentView: View {
             try log.write(to: logFileURL, atomically: true, encoding: .utf8)
         } catch {
             DispatchQueue.main.async {
-                logOutput += "Failed to write log file: \(error.localizedDescription)\n"
+                fullLogOutput += "Failed to write log file: \(error.localizedDescription)\n"
+                if !simpleLogMode {
+                    logOutput = fullLogOutput
+                }
             }
         }
     }
@@ -1297,10 +1326,9 @@ struct ContentView: View {
     
     /// Recursively download all reachable files from a given base URL to the given destination directory (mimics wget -r)
     func recursiveMirrorRepo(from baseURL: URL, to localDir: URL, isTopLevel: Bool = true) async {
-        await MainActor.run { 
-            if !simpleLogMode {
-                logOutput += "Recursively mirroring: \(baseURL.absoluteString)\n"
-            }
+        await MainActor.run {
+            fullLogOutput += "Recursively mirroring: \(baseURL.absoluteString)\n"
+            if !simpleLogMode { logOutput = fullLogOutput }
             progressPhase = "Downloading Metadata..."
         }
         let session = URLSession.shared
@@ -1340,26 +1368,23 @@ struct ContentView: View {
                 let localFileURL = localDir.appendingPathComponent(relativePath)
                 let isDirectory = link.hasSuffix("/")
                 if isDirectory {
-                    do { 
-                        try fileManager.createDirectory(at: localFileURL, withIntermediateDirectories: true, attributes: nil) 
+                    do {
+                        try fileManager.createDirectory(at: localFileURL, withIntermediateDirectories: true, attributes: nil)
                         await MainActor.run {
-                            if !simpleLogMode {
-                                logOutput += "Created directory for recursive mirror: \(localFileURL.path)\n"
-                            }
+                            fullLogOutput += "Created directory for recursive mirror: \(localFileURL.path)\n"
+                            if !simpleLogMode { logOutput = fullLogOutput }
                         }
                     } catch {
                         await MainActor.run {
-                            if !simpleLogMode {
-                                logOutput += "Failed to create directory during recursive mirror: \(localFileURL.path): \(error.localizedDescription)\n"
-                            }
+                            fullLogOutput += "Failed to create directory during recursive mirror: \(localFileURL.path): \(error.localizedDescription)\n"
+                            if !simpleLogMode { logOutput = fullLogOutput }
                         }
                     }
                     await recursiveMirrorRepo(from: subURL, to: localFileURL, isTopLevel: false)
                 } else {
-                    await MainActor.run { 
-                        if !simpleLogMode {
-                            logOutput += "Recursively downloading: \(subURL.absoluteString)\n"
-                        }
+                    await MainActor.run {
+                        fullLogOutput += "Recursively downloading: \(subURL.absoluteString)\n"
+                        if !simpleLogMode { logOutput = fullLogOutput }
                     }
                     do {
                         // Do not overwrite files already downloaded by the main pass
@@ -1367,16 +1392,14 @@ struct ContentView: View {
                             let fileData = try await fetchURL(subURL)
                             try fileData.write(to: localFileURL)
                             await MainActor.run {
-                                if !simpleLogMode {
-                                    logOutput += "Saved recursively to \(localFileURL.path)\n"
-                                }
+                                fullLogOutput += "Saved recursively to \(localFileURL.path)\n"
+                                if !simpleLogMode { logOutput = fullLogOutput }
                             }
                         }
                     } catch {
-                        await MainActor.run { 
-                            if !simpleLogMode {
-                                logOutput += "Failed to download (recursive) \(subURL.absoluteString): \(error.localizedDescription)\n"
-                            }
+                        await MainActor.run {
+                            fullLogOutput += "Failed to download (recursive) \(subURL.absoluteString): \(error.localizedDescription)\n"
+                            if !simpleLogMode { logOutput = fullLogOutput }
                         }
                     }
                 }
@@ -1384,17 +1407,15 @@ struct ContentView: View {
         } catch {
             // Not a directory or not listing, nothing to do
             await MainActor.run {
-                if !simpleLogMode {
-                    logOutput += "Directory fetch failed or not a directory: \(baseURL.absoluteString)\n"
-                    logOutput += "Error: \(error.localizedDescription)\n"
-                }
+                fullLogOutput += "Directory fetch failed or not a directory: \(baseURL.absoluteString)\n"
+                fullLogOutput += "Error: \(error.localizedDescription)\n"
+                if !simpleLogMode { logOutput = fullLogOutput }
             }
         }
         await MainActor.run {
             if Task.isCancelled {
-                if !simpleLogMode {
-                    logOutput += "\nRecursive mirror cancelled.\n"
-                }
+                fullLogOutput += "\nRecursive mirror cancelled.\n"
+                if !simpleLogMode { logOutput = fullLogOutput }
                 progressPhase = "Download cancelled"
             } else {
                 progressPhase = "Download complete"
@@ -1403,18 +1424,19 @@ struct ContentView: View {
             if isTopLevel {
                 // Append summary line to logOutput before writing log file
                 if Task.isCancelled {
-                    logOutput += "Summary: Operation cancelled by user.\n"
+                    fullLogOutput += "Summary: Operation cancelled by user.\n"
                 } else if errorOutput.isEmpty {
-                    logOutput += "Summary: Recursive mirror completed successfully.\n"
+                    fullLogOutput += "Summary: Recursive mirror completed successfully.\n"
                 } else {
-                    logOutput += "Summary: Recursive mirror completed with errors: \(errorOutput)\n"
+                    fullLogOutput += "Summary: Recursive mirror completed with errors: \(errorOutput)\n"
                 }
+                logOutput = simpleLogMode ? "" : fullLogOutput
                 isRunning = false
                 downloadTask = nil
                 isPaused = false
                 showOpenFolderButton = (repoFolderURL != nil && fileManager.fileExists(atPath: repoFolderURL!.path))
                 // Write log file at end
-                writeLogFile(to: localDir, log: logOutput)
+                writeLogFile(to: localDir, log: fullLogOutput)
                 mirrorTask = nil
             }
         }
