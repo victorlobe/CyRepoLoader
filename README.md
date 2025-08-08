@@ -80,7 +80,7 @@ All mirroring is done natively using Swift and URLSession with custom logic to p
 
 👨‍💻 Author
 
-Made with ❤️ by Victor Lobe
+Made with ❤️ by Victor Lobe (and ChatGPT because i knew nothing about Cydia Repos before this project)
 
 📄 License
 
