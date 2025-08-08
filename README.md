@@ -23,6 +23,7 @@
 
 - 🔗 Make an archive of every Cydia (or Installer) repo.
 - 📜 View real time download progress and logs
+- 🪟 Multi window support: run multiple download windows at the same time
 - 🧠 Automatically remembers recent repo URLs  
 - 🛑 Cancel downloads anytime  
 - 📥 Full repo mirror: All .deb files and metadata of the repo are saved.
