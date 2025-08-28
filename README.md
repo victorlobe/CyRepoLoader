@@ -67,6 +67,8 @@
 - [ ] Compare Repos with local files
 - [ ] Add a remote function for headless servers
 - [ ] Support for Installer.app repos
+- [ ] Fix repos with weird Structure
+- [ ] Make the whole App more stable and cleaner
 
 ## 🐞 Known Bugs
 
